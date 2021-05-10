@@ -1,5 +1,7 @@
 package provider
 
+import "fmt"
+
 type ServiceConfig struct {
 	Name  string             `mapstructure:"name"`
 	Host  string             `mapstructure:"host"`
@@ -17,4 +19,8 @@ type ServiceCheckConfig struct {
 	Timeout         string `mapstructure:"timeout"`
 	Interval        string `mapstructure:"interval"`
 	DeregisterAfter string `mapstructure:"deregisterAfter"`
+}
+
+func (p *ProviderConfig) GenerateProviderID() string  {
+	return fmt.Sprintf("%s-%s:%d",p.Service.Name,p.Service.Host,p.Service.Port)
 }
