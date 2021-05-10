@@ -9,7 +9,7 @@ import (
 )
 
 import (
-	cp "github.com/morax/config/provider"
+	cp "github.com/ForeverSRC/morax/config/provider"
 )
 
 type Service struct {

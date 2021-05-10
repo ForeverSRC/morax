@@ -2,7 +2,10 @@ package loadbalance
 
 import (
 	"fmt"
-	"github.com/morax/registry/consul"
+)
+
+import (
+	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type Balances struct {

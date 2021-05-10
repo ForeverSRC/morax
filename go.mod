@@ -1,4 +1,4 @@
-module github.com/morax
+module github.com/ForeverSRC/morax
 
 go 1.16
 

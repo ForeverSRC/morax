@@ -6,8 +6,8 @@ import (
 )
 
 import (
-	cp "github.com/morax/config/provider"
-	cr "github.com/morax/config/registry"
+	cp "github.com/ForeverSRC/morax/config/provider"
+	cr "github.com/ForeverSRC/morax/config/registry"
 )
 
 import (

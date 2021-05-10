@@ -1,10 +1,13 @@
 package consumer
 
 import (
-	"github.com/morax/common/constants"
-	"github.com/morax/common/utils"
-	cc "github.com/morax/config/consumer"
 	"strings"
+)
+
+import (
+	"github.com/ForeverSRC/morax/common/constants"
+	"github.com/ForeverSRC/morax/common/utils"
+	cc "github.com/ForeverSRC/morax/config/consumer"
 )
 
 type MethodInfo struct {

@@ -1,19 +1,20 @@
 package config
 
 import (
-	"github.com/morax/common/utils"
-	"github.com/morax/consumer"
+
 	"github.com/spf13/viper"
 	"log"
 	"os"
 )
 
 import (
-	cc "github.com/morax/config/consumer"
-	cp "github.com/morax/config/provider"
-	cr "github.com/morax/config/registry"
-	"github.com/morax/provider"
-	"github.com/morax/registry/consul"
+	"github.com/ForeverSRC/morax/common/utils"
+	"github.com/ForeverSRC/morax/consumer"
+	cc "github.com/ForeverSRC/morax/config/consumer"
+	cp "github.com/ForeverSRC/morax/config/provider"
+	cr "github.com/ForeverSRC/morax/config/registry"
+	"github.com/ForeverSRC/morax/provider"
+	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 var v = viper.New()

@@ -2,9 +2,13 @@ package loadbalance
 
 import (
 	"errors"
-	"github.com/morax/common/constants"
-	"github.com/morax/registry/consul"
+
 	"math/rand"
+)
+
+import (
+	"github.com/ForeverSRC/morax/common/constants"
+	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type RandomBalance struct {

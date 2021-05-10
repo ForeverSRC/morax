@@ -13,10 +13,10 @@ import (
 )
 
 import (
-	cc "github.com/morax/config/consumer"
-	. "github.com/morax/error"
-	"github.com/morax/loadbalance"
-	"github.com/morax/registry/consul"
+	cc "github.com/ForeverSRC/morax/config/consumer"
+	. "github.com/ForeverSRC/morax/error"
+	"github.com/ForeverSRC/morax/loadbalance"
+	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type RpcConsumer struct {
