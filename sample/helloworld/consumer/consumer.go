@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"log"
-)
-
-import (
+	"github.com/morax/config"
 	"github.com/morax/consumer"
+	"log"
 )
 
 import (
@@ -15,30 +13,29 @@ import (
 
 var p = HelloServiceConsumer{}
 
-var c consumer.RpcConsumer
-
 func init() {
-	err := c.RegistryConsumer(PROVIDER_NAME,&p)
-	if err != nil {
-		log.Fatal("error: ", err)
-	}
+
 }
 
 func main() {
+	config.Load()
+	err := consumer.RegistryConsumer(PROVIDER_NAME, &p)
+	if err != nil {
+		log.Fatal("error: ", err)
+	}
 
-	res,err:= p.Hello(HelloRequest{Target: "World"})
-	if err.Err!=nil{
-		fmt.Println(err)
-	}else{
+	res, rpcErr := p.Hello(HelloRequest{Target: "World"})
+	if rpcErr.Err != nil {
+		fmt.Println(rpcErr.Err)
+	} else {
 		fmt.Printf("result:%v\n", res)
 	}
 
-	res,err= p.Bye(HelloRequest{Target: "World"})
-	if err.Err!=nil{
-		fmt.Println(err)
-	}else{
+	res, rpcErr = p.Bye(HelloRequest{Target: "World"})
+	if rpcErr.Err != nil {
+		fmt.Println(rpcErr.Err)
+	} else {
 		fmt.Printf("result:%v\n", res)
 	}
 
 }
-

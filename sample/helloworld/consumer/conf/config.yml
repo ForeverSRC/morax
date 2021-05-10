@@ -1,0 +1,15 @@
+registries:
+  addr: "localhost:8500"
+
+consumer:
+  reference:
+    timeout: 800
+    providers:
+      "sample-hello-service":
+        loadBalance: "random"
+        retries: 1
+        methods:
+          "Hello":
+            loadBalance: "shuffle"
+            timeout: 200
+            retries: 2

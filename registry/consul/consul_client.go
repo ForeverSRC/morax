@@ -1,67 +1,54 @@
 package consul
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"strconv"
-	"time"
 )
 
-type HelloService struct {
-	SayHello func(req interface{}) interface{}
+import (
+	cp "github.com/morax/config/provider"
+	cr "github.com/morax/config/registry"
+)
 
-}
-
-type Invoker struct {
-	method func(p ...interface{}) interface{}
-	request struct{}
-	response struct{}
-}
+import (
+	consulapi "github.com/hashicorp/consul/api"
+)
 
 type DiscoveryClient struct {
-	host string
-	port int
-	url string
+	addr        string
+	registryUrl string
 }
 
-func NewClient(config DiscoveryClientConfig)* DiscoveryClient {
-	client:=&DiscoveryClient{host: config.Host,port: config.Port}
-	client.url="http://"+client.host+":"+strconv.Itoa(client.port)+"/v1/agent/service/register"
-	return client
+var client *consulapi.Client
+
+func NewClient(dcf *cr.ConsulClientConfig) {
+	var err error
+	conf := consulapi.DefaultConfig()
+	conf.Address = dcf.Addr
+	client, err = consulapi.NewClient(conf)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
-func (dc *DiscoveryClient) Register(info *InstanceConfig) error{
+func Register(info *cp.ProviderConfig) error {
+	registration := new(consulapi.AgentServiceRegistration)
+	registration.Name = info.Service.Name
+	registration.Port = info.Service.Port
+	registration.Address = info.Service.Host
 
-	byteData,err:=json.Marshal(info)
+	check := new(consulapi.AgentServiceCheck)
+	check.TCP = fmt.Sprintf("%s:%d", registration.Address, info.Service.Check.CheckPort)
+	check.Timeout = info.Service.Check.Timeout
+	check.Interval = info.Service.Check.Interval
+	check.DeregisterCriticalServiceAfter = info.Service.Check.DeregisterAfter // 故障检查失败30s后 consul自动将注册服务删除
+	registration.Check = check
 
-	if err != nil {
-		log.Printf("json format err: %s", err)
-		return err
-	}
-
-	req, err := http.NewRequest("PUT", dc.url,bytes.NewReader(byteData))
-
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json;charset=UTF-8")
-	client := http.Client{}
-	client.Timeout = time.Second * 2
-	resp, err := client.Do(req)
+	err := client.Agent().ServiceRegister(registration)
 
 	if err != nil {
-		log.Printf("register service err : %s", err)
+		log.Println("register error", err)
 		return err
-	}
-
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("register service http request errCode : %v", resp.StatusCode)
-		return fmt.Errorf("register service http request errCode : %v", resp.StatusCode)
 	}
 
 	log.Println("register service success")
@@ -69,4 +56,25 @@ func (dc *DiscoveryClient) Register(info *InstanceConfig) error{
 
 }
 
+func FindServer(serviceName string) ([]*ServiceInstance, error) {
+	client.Agent()
+	services, _, err := client.Health().Service(serviceName, "", true, nil)
+	if err != nil {
+		return nil, err
+	}
 
+	if len(services) == 0 {
+		return nil, nil
+	}
+
+	instances := make([]*ServiceInstance, len(services))
+	for i, s := range services {
+		instances[i] = &ServiceInstance{
+			Address: s.Service.Address,
+			Port:    s.Service.Port,
+		}
+	}
+
+	return instances, nil
+
+}

@@ -1,44 +1,64 @@
 package provider
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 )
 
+import (
+	cp "github.com/morax/config/provider"
+)
+
 type Service struct {
-	Addr string
-	server *rpc.Server
+	RpcAddr   string
+	CheckAddr string
+	server    *rpc.Server
 }
 
-func NewRpcService(addr string) *Service{
-	return &Service{
-		Addr: addr,
-		server: rpc.NewServer(),
+var providerService *Service
+
+func InitRpcService(c *cp.ProviderConfig) {
+	providerService = &Service{
+		RpcAddr:   fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Port),
+		CheckAddr: fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Check.CheckPort),
+		server:    rpc.NewServer(),
 	}
 }
 
 // provider是一个结构体指针
-func (s *Service) RegisterProvider(name string,provider interface{}) error {
-	return s.server.RegisterName(name,provider)
+func RegisterProvider(name string, provider interface{}) error {
+	return providerService.server.RegisterName(name, provider)
 }
 
-func (s *Service) ListenAndServe() {
-	listener, err := net.Listen("tcp", s.Addr)
+func ListenAndServe() {
+	go serve("rpc", providerService.RpcAddr, handleRpc)
+	go serve("check", providerService.CheckAddr, handleCheck)
+}
+
+func handleRpc(conn net.Conn) {
+	providerService.server.ServeCodec(jsonrpc.NewServerCodec(conn))
+}
+
+func handleCheck(conn net.Conn) {
+	conn.Close()
+}
+
+func serve(name string, addr string, handler func(conn net.Conn)) {
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatal("listen tcp error", err)
 	}
-	log.Println("service start listening")
-	for{
+	log.Printf("[%s]:start listening on %s", name, addr)
+	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Fatal("accept error", err)
+			log.Println("accept error", err)
+			continue
 		}
-		log.Println(conn.RemoteAddr().String())
 
-		go s.server.ServeCodec(jsonrpc.NewServerCodec(conn))
+		go handler(conn)
 	}
-	// todo: graceful shutdown
 }
-
