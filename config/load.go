@@ -33,6 +33,8 @@ func Load() {
 func loadConf() {
 	// read file from path which specified in environment variable "CONF_FILE_PATH"
 	v.SetConfigType("yaml")
+	wd,_:=os.Getwd()
+	log.Println("current work dir: ",wd)
 	path := os.Getenv("CONF_FILE_PATH")
 	log.Printf("config file path:%s\n", path)
 	v.SetConfigFile(path)
