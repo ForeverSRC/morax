@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -16,6 +15,7 @@ import (
 	cc "github.com/ForeverSRC/morax/config/consumer"
 	. "github.com/ForeverSRC/morax/error"
 	"github.com/ForeverSRC/morax/loadbalance"
+	"github.com/ForeverSRC/morax/logger"
 	"github.com/ForeverSRC/morax/registry/consul"
 )
 
@@ -42,7 +42,7 @@ func RegistryConsumer(name string, service interface{}) error {
 		field := s.Field(i)
 		rTyp, err := checkMethodField(&field)
 		if err != nil {
-			log.Println("check method field error", err)
+			logger.Error("check method field error: %s", err)
 			continue
 		}
 
@@ -131,12 +131,12 @@ func RegistryConsumer(name string, service interface{}) error {
 					{
 						timer.Stop()
 						cancel()
-						log.Printf("call failed, error:%s", fail)
+						logger.Error("call failed, error: %s", fail)
 						if count < info.Retries {
 							count++
 							go invoke(ctx, timer, true)
 						} else {
-							log.Printf("call reached retry times：%d\n", info.Retries)
+							logger.Warn("call reached retry times：%d", info.Retries)
 							return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
 								Err: fail,
 							})}
