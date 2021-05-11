@@ -2,12 +2,12 @@ package consul
 
 import (
 	"fmt"
-	"log"
 )
 
 import (
 	cp "github.com/ForeverSRC/morax/config/provider"
 	cr "github.com/ForeverSRC/morax/config/registry"
+	"github.com/ForeverSRC/morax/logger"
 )
 
 import (
@@ -27,7 +27,7 @@ func NewClient(dcf *cr.ConsulClientConfig) {
 	conf.Address = dcf.Addr
 	client, err = consulapi.NewClient(conf)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 }
 
@@ -48,11 +48,11 @@ func Register(info *cp.ProviderConfig) error {
 	err := client.Agent().ServiceRegister(registration)
 
 	if err != nil {
-		log.Println("register error", err)
+		logger.Error("register error: %s", err)
 		return err
 	}
 
-	log.Println("register service success")
+	logger.Info("register service success!")
 	return nil
 
 }
