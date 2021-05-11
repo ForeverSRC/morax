@@ -26,7 +26,7 @@ var (
 
 var levelMap = map[string]int{
 	"debug": debugLevel,
-	"info":   infoLevel,
+	"info":  infoLevel,
 	"warn":  warnLevel,
 	"error": errorLevel,
 }

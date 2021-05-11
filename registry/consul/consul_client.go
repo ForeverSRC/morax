@@ -58,7 +58,6 @@ func Register(info *cp.ProviderConfig) error {
 }
 
 func FindServer(serviceName string) ([]*ServiceInstance, error) {
-	client.Agent()
 	services, _, err := client.Health().Service(serviceName, "", true, nil)
 	if err != nil {
 		return nil, err
