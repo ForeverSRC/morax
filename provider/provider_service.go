@@ -57,7 +57,7 @@ func serve(name string, addr string, handler func(conn net.Conn)) {
 	if err != nil {
 		logger.Fatal("listen tcp error", err)
 	}
-	logger.Info("[%s]:start listening on %s", name, addr)
+	logger.Info("%s:start listening on %s", name, addr)
 	for {
 		conn, cErr := listener.Accept()
 		if cErr != nil {

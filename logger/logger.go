@@ -26,7 +26,7 @@ var (
 
 var levelMap = map[string]int{
 	"debug": debugLevel,
-	"ino":   infoLevel,
+	"info":   infoLevel,
 	"warn":  warnLevel,
 	"error": errorLevel,
 }
@@ -61,62 +61,62 @@ func (l *Logger) NewLogger(level string) {
 
 func Debug(format string, params ...interface{}) {
 	if logger.level <= debugLevel {
-		debug.Printf(format+"\n", params)
+		debug.Printf(format+"\n", params...)
 	}
 }
 
 func (l *Logger) Debug(format string, params ...interface{}) {
 	if l.level <= debugLevel {
-		debug.Printf(format+"\n", params)
+		debug.Printf(format+"\n", params...)
 	}
 }
 
 func Info(format string, params ...interface{}) {
 	if logger.level <= infoLevel {
-		info.Printf(format+"\n", params)
+		info.Printf(format+"\n", params...)
 	}
 
 }
 
 func (l *Logger) Info(format string, params ...interface{}) {
 	if l.level <= infoLevel {
-		info.Printf(format+"\n", params)
+		info.Printf(format+"\n", params...)
 	}
 
 }
 
 func Warn(format string, params ...interface{}) {
 	if logger.level <= warnLevel {
-		warn.Printf(format+"\n", params)
+		warn.Printf(format+"\n", params...)
 	}
 
 }
 
 func (l *Logger) Warn(format string, params ...interface{}) {
 	if l.level <= warnLevel {
-		warn.Printf(format+"\n", params)
+		warn.Printf(format+"\n", params...)
 	}
 
 }
 
 func Error(format string, params ...interface{}) {
 	if logger.level <= errorLevel {
-		err.Printf(format+"\n", params)
+		err.Printf(format+"\n", params...)
 	}
 
 }
 
 func (l *Logger) Error(format string, params ...interface{}) {
 	if l.level <= errorLevel {
-		err.Printf(format+"\n", params)
+		err.Printf(format+"\n", params...)
 	}
 
 }
 
 func Fatal(params ...interface{}) {
-	log.Fatal(params)
+	log.Fatal(params...)
 }
 
 func (l *Logger) Fatal(params ...interface{}) {
-	log.Fatal(params)
+	log.Fatal(params...)
 }
