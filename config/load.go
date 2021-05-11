@@ -1,7 +1,6 @@
 package config
 
 import (
-
 	"github.com/spf13/viper"
 	"log"
 	"os"
@@ -9,10 +8,10 @@ import (
 
 import (
 	"github.com/ForeverSRC/morax/common/utils"
-	"github.com/ForeverSRC/morax/consumer"
 	cc "github.com/ForeverSRC/morax/config/consumer"
 	cp "github.com/ForeverSRC/morax/config/provider"
 	cr "github.com/ForeverSRC/morax/config/registry"
+	"github.com/ForeverSRC/morax/consumer"
 	"github.com/ForeverSRC/morax/provider"
 	"github.com/ForeverSRC/morax/registry/consul"
 )

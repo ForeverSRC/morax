@@ -41,7 +41,7 @@ func ListenAndServe() {
 func handleRpc(conn net.Conn) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println("recover: rpc server error: ",err)
+			log.Println("recover: rpc server error: ", err)
 			conn.Close()
 		}
 	}()

@@ -33,7 +33,7 @@ func NewClient(dcf *cr.ConsulClientConfig) {
 
 func Register(info *cp.ProviderConfig) error {
 	registration := new(consulapi.AgentServiceRegistration)
-	registration.ID=info.GenerateProviderID()
+	registration.ID = info.GenerateProviderID()
 	registration.Name = info.Service.Name
 	registration.Port = info.Service.Port
 	registration.Address = info.Service.Host
