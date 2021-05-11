@@ -21,6 +21,6 @@ type ServiceCheckConfig struct {
 	DeregisterAfter string `mapstructure:"deregisterAfter"`
 }
 
-func (p *ProviderConfig) GenerateProviderID() string  {
-	return fmt.Sprintf("%s-%s:%d",p.Service.Name,p.Service.Host,p.Service.Port)
+func (p *ProviderConfig) GenerateProviderID() string {
+	return fmt.Sprintf("%s-%s:%d", p.Service.Name, p.Service.Host, p.Service.Port)
 }

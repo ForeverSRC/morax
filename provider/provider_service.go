@@ -2,7 +2,6 @@ package provider
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -10,6 +9,7 @@ import (
 
 import (
 	cp "github.com/ForeverSRC/morax/config/provider"
+	"github.com/ForeverSRC/morax/logger"
 )
 
 type Service struct {
@@ -39,6 +39,12 @@ func ListenAndServe() {
 }
 
 func handleRpc(conn net.Conn) {
+	defer func() {
+		if err := recover(); err != nil {
+			logger.Error("recover: rpc server error: %s", err)
+			conn.Close()
+		}
+	}()
 	providerService.server.ServeCodec(jsonrpc.NewServerCodec(conn))
 }
 
@@ -49,13 +55,13 @@ func handleCheck(conn net.Conn) {
 func serve(name string, addr string, handler func(conn net.Conn)) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal("listen tcp error", err)
+		logger.Fatal("listen tcp error", err)
 	}
-	log.Printf("[%s]:start listening on %s", name, addr)
+	logger.Info("%s:start listening on %s", name, addr)
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Println("accept error", err)
+		conn, cErr := listener.Accept()
+		if cErr != nil {
+			logger.Error("accept error: %s", cErr)
 			continue
 		}
 
