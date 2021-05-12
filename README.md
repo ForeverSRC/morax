@@ -1,6 +1,18 @@
 # Morax
-基于`net/rpc`包的rpc框架。
-## 使用示例
+## 概述
+基于`net/rpc`的go语言rpc框架。
+
+角色：
+
+* provider
+    * 服务提供者
+* comsumer
+    * 服务消费者
+* registry
+    * 注册中心
+    * Morax基于consul注册中心
+
+## 快速开始
 ### provider
 #### 实现rpc服务
 ```golang
