@@ -98,21 +98,21 @@ func (p *Service) ListenAndServe() {
 	go p.serve("check", p.CheckAddr, handleCheck)
 }
 
-func handleRpc(conn net.Conn) {
+func handleRpc(conn *net.Conn) {
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Error("recover: rpc server error: %s", err)
-			conn.Close()
+			(*conn).Close()
 		}
 	}()
-	providerService.server.ServeCodec(jsonrpc.NewServerCodec(conn))
+	providerService.server.ServeCodec(jsonrpc.NewServerCodec(*conn))
 }
 
-func handleCheck(conn net.Conn) {
-	conn.Close()
+func handleCheck(conn *net.Conn) {
+	(*conn).Close()
 }
 
-func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
+func (p *Service) serve(name string, addr string, handler func(conn *net.Conn)) {
 	if p.shuttingDown() {
 		return
 	}
@@ -136,13 +136,13 @@ func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
 			logger.Error("accept error: %s", cErr)
 			continue
 		}
-		handler(conn)
+		go handler(&conn)
 	}
 }
 
 const shutdownPollIntervalMax = 500 * time.Millisecond
 
-func Shutdown(ctx context.Context) error{
+func Shutdown(ctx context.Context) error {
 	return providerService.Shutdown(ctx)
 }
 
