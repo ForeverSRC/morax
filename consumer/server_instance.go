@@ -10,7 +10,7 @@ type ConsumeServersStore struct {
 	providerName string
 	m            []*consul.ServiceInstance
 	idx          uint64
-	mu           sync.Mutex
+	mu           sync.RWMutex
 }
 
 func NewConsumeServersStore(name string) *ConsumeServersStore {
@@ -19,8 +19,8 @@ func NewConsumeServersStore(name string) *ConsumeServersStore {
 	}
 }
 func (cs *ConsumeServersStore) Get() []*consul.ServiceInstance {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
 	return cs.m
 }
 
@@ -30,7 +30,14 @@ func (cs *ConsumeServersStore) Set(insts []*consul.ServiceInstance) {
 	cs.m = insts
 }
 
-func (cs *ConsumeServersStore) Watch() {
+func (cs *ConsumeServersStore) SetWithIndex(insts []*consul.ServiceInstance, idx uint64) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.m = insts
+	cs.idx = idx
+}
+
+func (cs *ConsumeServersStore) Watch() bool {
 	logger.Debug("Servers find start")
 	// 阻塞
 	services, meta, err := consul.FindServers(cs.providerName, cs.idx)
@@ -38,17 +45,14 @@ func (cs *ConsumeServersStore) Watch() {
 
 	if err != nil {
 		logger.Error("find provider %s error:%s", cs.providerName, err)
-		cs.mu.Lock()
-		cs.m = nil
-		cs.mu.Unlock()
-		return
+		cs.Set(nil)
+		return false
 	}
 
 	if len(services) == 0 {
-		cs.mu.Lock()
-		cs.m = nil
-		cs.mu.Unlock()
-		return
+		logger.Warn("find service: %s instance zero!", cs.providerName)
+		cs.Set(nil)
+		return false
 	}
 
 	instances := make([]*consul.ServiceInstance, len(services))
@@ -59,13 +63,12 @@ func (cs *ConsumeServersStore) Watch() {
 		}
 	}
 
-	cs.mu.Lock()
-	cs.m = instances
+	logger.Debug("Servers find return，pre index:%d, return index:%d", cs.idx, meta.LastIndex)
 	if meta.LastIndex < cs.idx {
-		cs.idx = 0
+		cs.SetWithIndex(instances, 0)
 	} else {
-		cs.idx = meta.LastIndex + 1
+		cs.SetWithIndex(instances, meta.LastIndex+1)
 	}
-	cs.mu.Unlock()
 
+	return true
 }

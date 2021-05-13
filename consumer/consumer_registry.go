@@ -165,14 +165,18 @@ func RegistryConsumer(name string, service interface{}) error {
 		field.Set(mf)
 	}
 
-	// 设置并启动监听
-	cs := NewConsumeServersStore(name)
-	consumer.providerInstances[name] = cs
-	go func() {
-		for {
-			cs.Watch()
-		}
-	}()
+	// 设置并启动监，避免对同一个provider多次设定监听
+	if _, ok := consumer.providerInstances[name]; !ok {
+		cs := NewConsumeServersStore(name)
+		consumer.providerInstances[name] = cs
+		go func() {
+			for {
+				if !cs.Watch() {
+					time.Sleep(5 * time.Second)
+				}
+			}
+		}()
+	}
 
 	return nil
 }
