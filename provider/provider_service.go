@@ -142,6 +142,10 @@ func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
 
 const shutdownPollIntervalMax = 500 * time.Millisecond
 
+func Shutdown(ctx context.Context) error{
+	return providerService.Shutdown(ctx)
+}
+
 func (p *Service) Shutdown(ctx context.Context) error {
 	// 修改关闭标识
 	p.inShutdown.setTrue()
