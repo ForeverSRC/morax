@@ -16,18 +16,19 @@ import (
 	. "github.com/ForeverSRC/morax/error"
 	"github.com/ForeverSRC/morax/loadbalance"
 	"github.com/ForeverSRC/morax/logger"
-	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type RpcConsumer struct {
-	conf *cc.ConsumerConfig
+	conf              *cc.ConsumerConfig
+	providerInstances map[string]*ConsumeServersStore
 }
 
 var consumer *RpcConsumer
 
 func NewRpcConsumer(config *cc.ConsumerConfig) {
 	consumer = &RpcConsumer{
-		conf: config,
+		conf:              config,
+		providerInstances: make(map[string]*ConsumeServersStore),
 	}
 }
 
@@ -63,12 +64,23 @@ func RegistryConsumer(name string, service interface{}) error {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			core := func(ctx context.Context) {
+				defer func() {
+					if e := recover(); e != nil {
+						logger.Error("recover: rpc call panic:%v", e)
+					}
+				}()
+
 				parseErr := func(err error) {
 					callFailCh <- err
 				}
 
 				// 服务发现
-				instances, err := consul.FindServer(name)
+				comsumeServs, ok := consumer.providerInstances[name]
+				if !ok {
+					parseErr(errors.New("no instance of provider: " + name))
+				}
+
+				instances := comsumeServs.Get()
 				if err != nil {
 					parseErr(err)
 					return
@@ -131,16 +143,9 @@ func RegistryConsumer(name string, service interface{}) error {
 					{
 						timer.Stop()
 						cancel()
-						logger.Error("call failed, error: %s", fail)
-						if count < info.Retries {
-							count++
-							go invoke(ctx, timer, true)
-						} else {
-							logger.Warn("call reached retry times：%d", info.Retries)
-							return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
-								Err: fail,
-							})}
-						}
+						return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
+							Err: fail,
+						})}
 					}
 				case <-timer.C:
 					{
@@ -159,6 +164,15 @@ func RegistryConsumer(name string, service interface{}) error {
 
 		field.Set(mf)
 	}
+
+	// 设置并启动监听
+	cs := NewConsumeServersStore(name)
+	consumer.providerInstances[name] = cs
+	go func() {
+		for {
+			cs.Watch()
+		}
+	}()
 
 	return nil
 }
