@@ -136,7 +136,7 @@ func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
 			logger.Error("accept error: %s", cErr)
 			continue
 		}
-		go handler(conn)
+		handler(conn)
 	}
 }
 
