@@ -61,6 +61,9 @@ func RegistryConsumer(name string, service interface{}) error {
 		mf := reflect.MakeFunc(field.Type(), func(args []reflect.Value) []reflect.Value {
 			callSuccessCh := make(chan []reflect.Value)
 			callFailCh := make(chan error)
+			defer close(callSuccessCh)
+			defer close(callFailCh)
+
 			ctx, cancel := context.WithCancel(context.Background())
 
 			core := func(ctx context.Context) {
