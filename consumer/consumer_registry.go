@@ -102,6 +102,8 @@ func RegistryConsumer(name string, service interface{}) error {
 					return
 				}
 
+				defer conn.Close()
+
 				client := rpc.NewClientWithCodec(jsonrpc.NewClientCodec(conn))
 				resp := reflect.New(*rTyp) //a pointer
 				err = client.Call(serviceMethod, args[0].Interface(), resp.Interface())
