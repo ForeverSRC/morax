@@ -16,18 +16,19 @@ import (
 	. "github.com/ForeverSRC/morax/error"
 	"github.com/ForeverSRC/morax/loadbalance"
 	"github.com/ForeverSRC/morax/logger"
-	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type RpcConsumer struct {
-	conf *cc.ConsumerConfig
+	conf              *cc.ConsumerConfig
+	providerInstances map[string]*ConsumeServersStore
 }
 
 var consumer *RpcConsumer
 
 func NewRpcConsumer(config *cc.ConsumerConfig) {
 	consumer = &RpcConsumer{
-		conf: config,
+		conf:              config,
+		providerInstances: make(map[string]*ConsumeServersStore),
 	}
 }
 
@@ -60,15 +61,29 @@ func RegistryConsumer(name string, service interface{}) error {
 		mf := reflect.MakeFunc(field.Type(), func(args []reflect.Value) []reflect.Value {
 			callSuccessCh := make(chan []reflect.Value)
 			callFailCh := make(chan error)
+			defer close(callSuccessCh)
+			defer close(callFailCh)
+
 			ctx, cancel := context.WithCancel(context.Background())
 
 			core := func(ctx context.Context) {
+				defer func() {
+					if e := recover(); e != nil {
+						logger.Error("recover: rpc call panic:%v", e)
+					}
+				}()
+
 				parseErr := func(err error) {
 					callFailCh <- err
 				}
 
 				// 服务发现
-				instances, err := consul.FindServer(name)
+				comsumeServs, ok := consumer.providerInstances[name]
+				if !ok {
+					parseErr(errors.New("no instance of provider: " + name))
+				}
+
+				instances := comsumeServs.Get()
 				if err != nil {
 					parseErr(err)
 					return
@@ -86,6 +101,8 @@ func RegistryConsumer(name string, service interface{}) error {
 					parseErr(err)
 					return
 				}
+
+				defer conn.Close()
 
 				client := rpc.NewClientWithCodec(jsonrpc.NewClientCodec(conn))
 				resp := reflect.New(*rTyp) //a pointer
@@ -131,16 +148,9 @@ func RegistryConsumer(name string, service interface{}) error {
 					{
 						timer.Stop()
 						cancel()
-						logger.Error("call failed, error: %s", fail)
-						if count < info.Retries {
-							count++
-							go invoke(ctx, timer, true)
-						} else {
-							logger.Warn("call reached retry times：%d", info.Retries)
-							return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
-								Err: fail,
-							})}
-						}
+						return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
+							Err: fail,
+						})}
 					}
 				case <-timer.C:
 					{
@@ -158,6 +168,19 @@ func RegistryConsumer(name string, service interface{}) error {
 		})
 
 		field.Set(mf)
+	}
+
+	// 设置并启动监，避免对同一个provider多次设定监听
+	if _, ok := consumer.providerInstances[name]; !ok {
+		cs := NewConsumeServersStore(name)
+		consumer.providerInstances[name] = cs
+		go func() {
+			for {
+				if !cs.Watch() {
+					time.Sleep(5 * time.Second)
+				}
+			}
+		}()
 	}
 
 	return nil

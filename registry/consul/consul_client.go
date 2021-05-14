@@ -2,6 +2,7 @@ package consul
 
 import (
 	"fmt"
+	"time"
 )
 
 import (
@@ -14,17 +15,17 @@ import (
 	consulapi "github.com/hashicorp/consul/api"
 )
 
-type DiscoveryClient struct {
-	addr        string
-	registryUrl string
-}
-
 var client *consulapi.Client
 
 func NewClient(dcf *cr.ConsulClientConfig) {
 	var err error
 	conf := consulapi.DefaultConfig()
 	conf.Address = dcf.Addr
+	if dcf.WaitTimeout == 0 {
+		conf.WaitTime = 5 * time.Minute
+	} else {
+		conf.WaitTime = time.Duration(dcf.WaitTimeout) * time.Second
+	}
 	client, err = consulapi.NewClient(conf)
 	if err != nil {
 		logger.Fatal(err)
@@ -57,24 +58,7 @@ func Register(info *cp.ProviderConfig) error {
 
 }
 
-func FindServer(serviceName string) ([]*ServiceInstance, error) {
-	services, _, err := client.Health().Service(serviceName, "", true, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(services) == 0 {
-		return nil, nil
-	}
-
-	instances := make([]*ServiceInstance, len(services))
-	for i, s := range services {
-		instances[i] = &ServiceInstance{
-			Address: s.Service.Address,
-			Port:    s.Service.Port,
-		}
-	}
-
-	return instances, nil
-
+func FindServers(name string, idx uint64) ([]*consulapi.ServiceEntry, *consulapi.QueryMeta, error) {
+	// 阻塞
+	return client.Health().Service(name, "", true, &consulapi.QueryOptions{WaitIndex: idx})
 }
