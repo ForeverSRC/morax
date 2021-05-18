@@ -36,9 +36,10 @@ func NewRpcConsumer(config *cc.ConsumerConfig) {
 
 func (c *RpcConsumer) NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
 	con := &RpcConsumer{
-		conf:      config,
-		providers: make(map[string]*ProviderInstances),
-		ctx:       ctx,
+		conf:       config,
+		providers:  make(map[string]*ProviderInstances),
+		ctx:        ctx,
+		watcherCtx: make(map[*context.Context]context.CancelFunc),
 	}
 	con.inShutdown.SetFalse()
 	return con
