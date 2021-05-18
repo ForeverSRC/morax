@@ -62,3 +62,7 @@ func FindServers(name string, idx uint64) ([]*consulapi.ServiceEntry, *consulapi
 	// 阻塞
 	return client.Health().Service(name, "", true, &consulapi.QueryOptions{WaitIndex: idx})
 }
+
+func Deregister(id string) error {
+	return client.Agent().ServiceDeregister(id)
+}

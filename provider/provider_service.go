@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/ForeverSRC/morax/common/utils"
+	"github.com/ForeverSRC/morax/registry/consul"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -18,6 +19,7 @@ import (
 )
 
 type Service struct {
+	id         string
 	RpcAddr    string
 	CheckAddr  string
 	server     *rpc.Server
@@ -67,6 +69,7 @@ var providerService *Service
 
 func InitRpcService(c *cp.ProviderConfig) {
 	providerService = &Service{
+		id:        c.GenerateProviderID(),
 		RpcAddr:   fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Port),
 		CheckAddr: fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Check.CheckPort),
 		server:    rpc.NewServer(),
@@ -143,8 +146,10 @@ func Shutdown(ctx context.Context) error {
 func (p *Service) Shutdown(ctx context.Context) error {
 	// 修改关闭标识
 	p.inShutdown.SetTrue()
-	// 关闭所有打开的listener
 	p.mu.Lock()
+	// 向注册中心注销实例
+	_ = consul.Deregister(p.id)
+	// 关闭所有打开的listener
 	lnerr := p.closeListenersLocked()
 	p.mu.Unlock()
 
