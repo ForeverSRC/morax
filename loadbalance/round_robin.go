@@ -3,7 +3,6 @@ package loadbalance
 import (
 	"errors"
 	"github.com/ForeverSRC/morax/common/constants"
-	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type RoundRobin struct {
@@ -14,17 +13,17 @@ func init() {
 	RegisterBalance(constants.RoundRobin, &RoundRobin{})
 }
 
-func (r *RoundRobin) DoBalance(instances []*consul.ServiceInstance) (*consul.ServiceInstance, error) {
-	lens := len(instances)
+func (r *RoundRobin) DoBalance(instanceIds []string) (string, error) {
+	lens := len(instanceIds)
 	if lens == 0 {
-		return nil, errors.New("no instance found")
+		return "", errors.New("no instance found")
 	}
 
 	if r.curIdx >= lens {
 		r.curIdx = 0
 	}
 
-	inst := instances[r.curIdx]
+	inst := instanceIds[r.curIdx]
 	r.curIdx = (r.curIdx + 1) % lens
 
 	return inst, nil

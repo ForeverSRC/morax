@@ -3,31 +3,25 @@ package provider
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"github.com/ForeverSRC/morax/common/utils"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 import (
+	"github.com/ForeverSRC/morax/common/types"
 	cp "github.com/ForeverSRC/morax/config/provider"
 	"github.com/ForeverSRC/morax/logger"
 )
-
-type atomicBool int32
-
-func (b *atomicBool) isSet() bool { return atomic.LoadInt32((*int32)(b)) != 0 }
-func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
-func (b *atomicBool) setFalse()   { atomic.StoreInt32((*int32)(b), 0) }
 
 type Service struct {
 	RpcAddr    string
 	CheckAddr  string
 	server     *rpc.Server
-	inShutdown atomicBool
+	inShutdown types.AtomicBool
 	mu         sync.Mutex
 	listeners  map[*net.Listener]struct{}
 }
@@ -66,7 +60,7 @@ func (p *Service) numListeners() int {
 }
 
 func (p *Service) shuttingDown() bool {
-	return p.inShutdown.isSet()
+	return p.inShutdown.IsSet()
 }
 
 var providerService *Service
@@ -77,7 +71,7 @@ func InitRpcService(c *cp.ProviderConfig) {
 		CheckAddr: fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Check.CheckPort),
 		server:    rpc.NewServer(),
 	}
-	providerService.inShutdown.setFalse()
+	providerService.inShutdown.SetFalse()
 }
 
 // provider是一个结构体指针
@@ -142,35 +136,20 @@ func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
 	}
 }
 
-const shutdownPollIntervalMax = 500 * time.Millisecond
-
 func Shutdown(ctx context.Context) error {
 	return providerService.Shutdown(ctx)
 }
 
 func (p *Service) Shutdown(ctx context.Context) error {
 	// 修改关闭标识
-	p.inShutdown.setTrue()
+	p.inShutdown.SetTrue()
 	// 关闭所有打开的listener
 	p.mu.Lock()
 	lnerr := p.closeListenersLocked()
 	p.mu.Unlock()
 
 	pollIntervalBase := time.Millisecond
-
-	//计算下次等待时间
-	nextPollInterval := func() time.Duration {
-		// Add 10% jitter.
-		interval := pollIntervalBase + time.Duration(rand.Intn(int(pollIntervalBase/10)))
-		// Double and clamp for next time.
-		pollIntervalBase *= 2
-		if pollIntervalBase > shutdownPollIntervalMax {
-			pollIntervalBase = shutdownPollIntervalMax
-		}
-		return interval
-	}
-
-	timer := time.NewTimer(nextPollInterval())
+	timer := time.NewTimer(utils.NextPollInterval(&pollIntervalBase))
 	defer timer.Stop()
 	for {
 		// 没有打开的listener
@@ -181,7 +160,7 @@ func (p *Service) Shutdown(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			timer.Reset(nextPollInterval())
+			timer.Reset(utils.NextPollInterval(&pollIntervalBase))
 		}
 	}
 }

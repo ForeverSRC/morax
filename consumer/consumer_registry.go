@@ -4,46 +4,108 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"net/rpc"
-	"net/rpc/jsonrpc"
 	"reflect"
+	"sync"
 	"time"
 )
 
 import (
+	"github.com/ForeverSRC/morax/common/types"
+	"github.com/ForeverSRC/morax/common/utils"
 	cc "github.com/ForeverSRC/morax/config/consumer"
 	. "github.com/ForeverSRC/morax/error"
-	"github.com/ForeverSRC/morax/loadbalance"
 	"github.com/ForeverSRC/morax/logger"
 )
 
 type RpcConsumer struct {
-	conf              *cc.ConsumerConfig
-	providerInstances map[string]*ConsumeServersStore
+	conf *cc.ConsumerConfig
+	// providers 订阅的服务提供者集合 providerName->instances
+	providers      map[string]*ProviderInstances
+	inShutdown     types.AtomicBool
+	mu             sync.Mutex
+	ctx            context.Context
+	watcherCtx     map[*context.Context]context.CancelFunc
+	allClientClose bool
 }
 
 var consumer *RpcConsumer
 
-func NewRpcConsumer(config *cc.ConsumerConfig) {
-	consumer = &RpcConsumer{
-		conf:              config,
-		providerInstances: make(map[string]*ConsumeServersStore),
+func NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) {
+	consumer = consumer.NewRpcConsumer(ctx, config)
+}
+
+func (c *RpcConsumer) NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
+	con := &RpcConsumer{
+		conf:      config,
+		providers: make(map[string]*ProviderInstances),
+		ctx:       ctx,
 	}
+	con.inShutdown.SetFalse()
+	return con
+}
+
+func Shutdown(ctx context.Context) error {
+	return consumer.Shutdown(ctx)
+}
+
+func (c *RpcConsumer) Shutdown(ctx context.Context) error {
+	// 设置标志位
+	c.inShutdown.SetTrue()
+	c.mu.Lock()
+	// 关闭所有rpc client
+	// net/rpc包中 Client的close方法会通过加锁的机制，阻塞等待当前send完成
+	c.closeAllClientLock()
+	// 停止所有watcher
+	for _, cancel := range c.watcherCtx {
+		cancel()
+	}
+	c.mu.Unlock()
+
+	pollIntervalBase := time.Millisecond
+	timer := time.NewTimer(utils.NextPollInterval(&pollIntervalBase))
+	defer timer.Stop()
+	for {
+		// 没有打开的rpc client
+		if c.allClientClose {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			timer.Reset(utils.NextPollInterval(&pollIntervalBase))
+		}
+	}
+
+}
+
+func (c *RpcConsumer) closeAllClientLock() {
+	for _, p := range c.providers {
+		for _, client := range p.instances {
+			_ = client.Close()
+		}
+	}
+	c.allClientClose = true
 }
 
 func RegistryConsumer(name string, service interface{}) error {
+	return consumer.RegistryConsumer(name, service)
+}
+
+func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 	//获得传入结构体指针实际指向的结构体
 	s := reflect.ValueOf(service).Elem()
 	if s.Kind() != reflect.Struct {
-		return errors.New("invalid service type")
+		return errors.New("invalid consumer service type")
 	}
+
 	for i := 0; i < s.NumField(); i++ {
 		// 函数
 		field := s.Field(i)
-		rTyp, err := checkMethodField(&field)
-		if err != nil {
-			logger.Error("check method field error: %s", err)
+		rTyp, er := checkMethodField(&field)
+		if er != nil {
+			logger.Error("check method field error: %s", er)
 			continue
 		}
 
@@ -56,15 +118,22 @@ func RegistryConsumer(name string, service interface{}) error {
 			MethodName:   methodName,
 		}
 		// 获取当前方法的配置：负载均衡策略，超时重试
-		info.SetConfigInfo(consumer.conf)
+		info.SetConfigInfo(c.conf)
 
 		mf := reflect.MakeFunc(field.Type(), func(args []reflect.Value) []reflect.Value {
+			// consumer处于shutdown阶段时停止一切调用，返回错误
+			if c.inShutdown.IsSet() {
+				return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
+					Err: fmt.Errorf("consumer is shutting down"),
+				})}
+			}
+
 			callSuccessCh := make(chan []reflect.Value)
 			callFailCh := make(chan error)
 			defer close(callSuccessCh)
 			defer close(callFailCh)
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(c.ctx)
 
 			core := func(ctx context.Context) {
 				defer func() {
@@ -78,33 +147,18 @@ func RegistryConsumer(name string, service interface{}) error {
 				}
 
 				// 服务发现
-				comsumeServs, ok := consumer.providerInstances[name]
+				providerInstances, ok := c.providers[name]
 				if !ok {
 					parseErr(errors.New("no instance of provider: " + name))
 				}
 
-				instances := comsumeServs.Get()
-				if err != nil {
-					parseErr(err)
-					return
-				}
-
 				// 负载均衡
-				inst, err := loadbalance.DoBalance(info.LBType, instances)
+				client, err := providerInstances.LoadBalance(info.LBType)
 				if err != nil {
 					parseErr(err)
 				}
 
 				// 调用
-				conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", inst.Address, inst.Port))
-				if err != nil {
-					parseErr(err)
-					return
-				}
-
-				defer conn.Close()
-
-				client := rpc.NewClientWithCodec(jsonrpc.NewClientCodec(conn))
 				resp := reflect.New(*rTyp) //a pointer
 				err = client.Call(serviceMethod, args[0].Interface(), resp.Interface())
 				if err != nil {
@@ -131,6 +185,7 @@ func RegistryConsumer(name string, service interface{}) error {
 				}
 			}
 
+			// 实际调用过程
 			count := 0
 			timer := time.NewTimer(time.Millisecond * time.Duration(info.Timeout))
 			go invoke(ctx, timer, false)
@@ -148,14 +203,21 @@ func RegistryConsumer(name string, service interface{}) error {
 					{
 						timer.Stop()
 						cancel()
-						return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
-							Err: fail,
-						})}
+						// todo: 失败重试
+						if count < info.Retries {
+							count++
+							go invoke(ctx, timer, true)
+						} else {
+							return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
+								Err: fail,
+							})}
+						}
 					}
 				case <-timer.C:
 					{
 						timer.Stop()
 						cancel()
+						// todo: 超时重试
 						if count < info.Retries {
 							count++
 							go invoke(ctx, timer, true)
@@ -171,16 +233,24 @@ func RegistryConsumer(name string, service interface{}) error {
 	}
 
 	// 设置并启动监，避免对同一个provider多次设定监听
-	if _, ok := consumer.providerInstances[name]; !ok {
-		cs := NewConsumeServersStore(name)
-		consumer.providerInstances[name] = cs
-		go func() {
+	if _, ok := c.providers[name]; !ok {
+		pss := NewProviderInstances(name)
+		c.providers[name] = pss
+		ctx, cancel := context.WithCancel(c.ctx)
+		c.watcherCtx[&ctx] = cancel
+		go func(ctx context.Context) {
 			for {
-				if !cs.Watch() {
-					time.Sleep(5 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					if !pss.Watch() {
+						time.Sleep(5 * time.Second)
+					}
 				}
+
 			}
-		}()
+		}(ctx)
 	}
 
 	return nil
