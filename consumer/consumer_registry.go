@@ -30,8 +30,8 @@ type RpcConsumer struct {
 
 var consumer *RpcConsumer
 
-func NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) {
-	consumer = consumer.NewRpcConsumer(ctx, config)
+func NewRpcConsumer(config *cc.ConsumerConfig) {
+	consumer = consumer.NewRpcConsumer(context.Background(), config)
 }
 
 func (c *RpcConsumer) NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
