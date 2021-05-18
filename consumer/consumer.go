@@ -248,11 +248,8 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 				case <-ctx.Done():
 					return
 				default:
-					if !pss.Watch() {
-						time.Sleep(5 * time.Second)
-					}
+					pss.Watch()
 				}
-
 			}
 		}(ctx)
 	}
