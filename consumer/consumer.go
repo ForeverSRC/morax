@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ForeverSRC/morax/registry/consul"
 	"reflect"
 	"sync"
 	"time"
@@ -60,6 +61,8 @@ func (c *RpcConsumer) Shutdown(ctx context.Context) error {
 	for _, cancel := range c.watcherCtx {
 		cancel()
 	}
+	// 关闭consul client的idle connection
+	consul.CloseIdleConn()
 	c.mu.Unlock()
 
 	pollIntervalBase := time.Millisecond

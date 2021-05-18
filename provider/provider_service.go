@@ -190,12 +190,19 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	p.inShutdown.SetTrue()
 
 	p.mu.Lock()
+
 	// 向注册中心注销实例
 	_ = consul.Deregister(p.id)
+
+	// 关闭consul client的idle connections
+	consul.CloseIdleConn()
+
 	// 关闭所有打开的listener
 	lnerr := p.closeListenersLocked()
+
 	// 等待已有线程结束
 	p.rpcWg.Wait()
+
 	p.mu.Unlock()
 
 	pollIntervalBase := time.Millisecond
