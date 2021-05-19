@@ -4,10 +4,6 @@ import (
 	"fmt"
 )
 
-import (
-	"github.com/ForeverSRC/morax/registry/consul"
-)
-
 type Balances struct {
 	allBalance map[string]Balance
 }
@@ -24,11 +20,11 @@ func RegisterBalance(balanceType string, b Balance) {
 	balances.allBalance[balanceType] = b
 }
 
-func DoBalance(bType string, instances []*consul.ServiceInstance) (*consul.ServiceInstance, error) {
+func DoBalance(bType string, instanceIds []string) (string, error) {
 	balanceType, ok := balances.allBalance[bType]
 	if !ok {
-		return nil, fmt.Errorf("un found balance type:%s\n", bType)
+		return "", fmt.Errorf("un found balance type:%s\n", bType)
 	}
 
-	return balanceType.DoBalance(instances)
+	return balanceType.DoBalance(instanceIds)
 }

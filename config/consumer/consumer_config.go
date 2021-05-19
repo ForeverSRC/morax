@@ -22,4 +22,5 @@ type ConfInfo struct {
 	LBType  string `mapstructure:"loadBalance"`
 	Retries int    `mapstructure:"retries"`
 	Timeout int    `mapstructure:"timeout"`
+	Cluster string `mapstructure:"cluster"`
 }
