@@ -3,33 +3,31 @@ package provider
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"github.com/ForeverSRC/morax/common/utils"
+	"github.com/ForeverSRC/morax/registry/consul"
 	"net"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 import (
+	"github.com/ForeverSRC/morax/common/types"
 	cp "github.com/ForeverSRC/morax/config/provider"
 	"github.com/ForeverSRC/morax/logger"
 )
 
-type atomicBool int32
-
-func (b *atomicBool) isSet() bool { return atomic.LoadInt32((*int32)(b)) != 0 }
-func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
-func (b *atomicBool) setFalse()   { atomic.StoreInt32((*int32)(b), 0) }
-
 type Service struct {
+	id         string
 	RpcAddr    string
 	CheckAddr  string
 	server     *rpc.Server
-	inShutdown atomicBool
+	inShutdown types.AtomicBool
 	mu         sync.Mutex
 	listeners  map[*net.Listener]struct{}
+	rpcWg      sync.WaitGroup
 }
 
 func (p *Service) closeListenersLocked() error {
@@ -66,18 +64,20 @@ func (p *Service) numListeners() int {
 }
 
 func (p *Service) shuttingDown() bool {
-	return p.inShutdown.isSet()
+	return p.inShutdown.IsSet()
 }
 
 var providerService *Service
 
 func InitRpcService(c *cp.ProviderConfig) {
 	providerService = &Service{
+		id:        c.GenerateProviderID(),
 		RpcAddr:   fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Port),
 		CheckAddr: fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Check.CheckPort),
 		server:    rpc.NewServer(),
+		rpcWg:     sync.WaitGroup{},
 	}
-	providerService.inShutdown.setFalse()
+	providerService.inShutdown.SetFalse()
 }
 
 // provider是一个结构体指针
@@ -94,35 +94,37 @@ func ListenAndServe() {
 }
 
 func (p *Service) ListenAndServe() {
-	go p.serve("rpc", p.RpcAddr, handleRpc)
-	go p.serve("check", p.CheckAddr, handleCheck)
+	go p.serveRpc()
+	go p.serveCheck()
 }
 
-func handleRpc(conn net.Conn) {
+func (p *Service) handleRpc(conn net.Conn) {
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Error("recover: rpc server error: %s", err)
 		}
 		conn.Close()
+		p.rpcWg.Done()
 	}()
 	providerService.server.ServeCodec(jsonrpc.NewServerCodec(conn))
 }
 
-func handleCheck(conn net.Conn) {
+func (p *Service) handleCheck(conn net.Conn) {
 	defer func() {
 		conn.Close()
 	}()
 }
 
-func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
+func (p *Service) serveRpc() {
 	if p.shuttingDown() {
 		return
 	}
-	listener, err := net.Listen("tcp", addr)
+
+	listener, err := net.Listen("tcp", p.RpcAddr)
 	if err != nil {
 		logger.Fatal("listen tcp error", err)
 	}
-	logger.Info("%s:start listening on %s", name, addr)
+	logger.Info("rpc:start listening on %s", p.RpcAddr)
 	if !p.trackListener(&listener, true) {
 		return
 	}
@@ -135,14 +137,49 @@ func (p *Service) serve(name string, addr string, handler func(conn net.Conn)) {
 
 		conn, cErr := listener.Accept()
 		if cErr != nil {
+			if strings.Contains(cErr.Error(), "use of closed network connection") {
+				break
+			}
+
 			logger.Error("accept error: %s", cErr)
 			continue
 		}
-		go handler(conn)
+		p.rpcWg.Add(1)
+		go p.handleRpc(conn)
 	}
 }
 
-const shutdownPollIntervalMax = 500 * time.Millisecond
+func (p *Service) serveCheck() {
+	if p.shuttingDown() {
+		return
+	}
+
+	listener, err := net.Listen("tcp", p.CheckAddr)
+	if err != nil {
+		logger.Fatal("listen tcp error", err)
+	}
+	logger.Info("check:start listening on %s", p.CheckAddr)
+	if !p.trackListener(&listener, true) {
+		return
+	}
+	defer p.trackListener(&listener, false)
+
+	for {
+		if p.shuttingDown() {
+			return
+		}
+		conn, cErr := listener.Accept()
+		if cErr != nil {
+			if strings.Contains(cErr.Error(), "use of closed network connection") {
+				break
+			}
+
+			logger.Error("accept error: %s", cErr)
+			continue
+		}
+		go p.handleCheck(conn)
+	}
+}
 
 func Shutdown(ctx context.Context) error {
 	return providerService.Shutdown(ctx)
@@ -150,27 +187,26 @@ func Shutdown(ctx context.Context) error {
 
 func (p *Service) Shutdown(ctx context.Context) error {
 	// 修改关闭标识
-	p.inShutdown.setTrue()
-	// 关闭所有打开的listener
+	p.inShutdown.SetTrue()
+
 	p.mu.Lock()
+
+	// 向注册中心注销实例
+	_ = consul.Deregister(p.id)
+
+	// 关闭consul client的idle connections
+	consul.CloseIdleConn()
+
+	// 关闭所有打开的listener
 	lnerr := p.closeListenersLocked()
+
+	// 等待已有线程结束
+	p.rpcWg.Wait()
+
 	p.mu.Unlock()
 
 	pollIntervalBase := time.Millisecond
-
-	//计算下次等待时间
-	nextPollInterval := func() time.Duration {
-		// Add 10% jitter.
-		interval := pollIntervalBase + time.Duration(rand.Intn(int(pollIntervalBase/10)))
-		// Double and clamp for next time.
-		pollIntervalBase *= 2
-		if pollIntervalBase > shutdownPollIntervalMax {
-			pollIntervalBase = shutdownPollIntervalMax
-		}
-		return interval
-	}
-
-	timer := time.NewTimer(nextPollInterval())
+	timer := time.NewTimer(utils.NextPollInterval(&pollIntervalBase))
 	defer timer.Stop()
 	for {
 		// 没有打开的listener
@@ -181,7 +217,7 @@ func (p *Service) Shutdown(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			timer.Reset(nextPollInterval())
+			timer.Reset(utils.NextPollInterval(&pollIntervalBase))
 		}
 	}
 }

@@ -2,6 +2,7 @@ package consul
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -15,7 +16,12 @@ import (
 	consulapi "github.com/hashicorp/consul/api"
 )
 
-var client *consulapi.Client
+type consulClientInfo struct {
+	consulClient *consulapi.Client
+	httpClient   *http.Client
+}
+
+var clientInfo *consulClientInfo
 
 func NewClient(dcf *cr.ConsulClientConfig) {
 	var err error
@@ -26,10 +32,12 @@ func NewClient(dcf *cr.ConsulClientConfig) {
 	} else {
 		conf.WaitTime = time.Duration(dcf.WaitTimeout) * time.Second
 	}
-	client, err = consulapi.NewClient(conf)
+
+	client, err := consulapi.NewClient(conf)
 	if err != nil {
 		logger.Fatal(err)
 	}
+	clientInfo = &consulClientInfo{consulClient: client, httpClient: conf.HttpClient}
 }
 
 func Register(info *cp.ProviderConfig) error {
@@ -46,7 +54,7 @@ func Register(info *cp.ProviderConfig) error {
 	check.DeregisterCriticalServiceAfter = info.Service.Check.DeregisterAfter // 故障检查失败30s后 consul自动将注册服务删除
 	registration.Check = check
 
-	err := client.Agent().ServiceRegister(registration)
+	err := clientInfo.consulClient.Agent().ServiceRegister(registration)
 
 	if err != nil {
 		logger.Error("register error: %s", err)
@@ -60,5 +68,13 @@ func Register(info *cp.ProviderConfig) error {
 
 func FindServers(name string, idx uint64) ([]*consulapi.ServiceEntry, *consulapi.QueryMeta, error) {
 	// 阻塞
-	return client.Health().Service(name, "", true, &consulapi.QueryOptions{WaitIndex: idx})
+	return clientInfo.consulClient.Health().Service(name, "", true, &consulapi.QueryOptions{WaitIndex: idx})
+}
+
+func Deregister(id string) error {
+	return clientInfo.consulClient.Agent().ServiceDeregister(id)
+}
+
+func CloseIdleConn() {
+	clientInfo.httpClient.CloseIdleConnections()
 }
