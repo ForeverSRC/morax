@@ -3,20 +3,20 @@ package provider
 import (
 	"context"
 	"fmt"
-	"github.com/ForeverSRC/morax/common/utils"
-	"github.com/ForeverSRC/morax/registry/consul"
 	"net"
 	"net/rpc"
-	"net/rpc/jsonrpc"
 	"strings"
 	"sync"
 	"time"
 )
 
 import (
+	codec2 "github.com/ForeverSRC/morax/codec"
 	"github.com/ForeverSRC/morax/common/types"
+	"github.com/ForeverSRC/morax/common/utils"
 	cp "github.com/ForeverSRC/morax/config/provider"
 	"github.com/ForeverSRC/morax/logger"
+	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type Service struct {
@@ -27,6 +27,7 @@ type Service struct {
 	inShutdown types.AtomicBool
 	mu         sync.Mutex
 	listeners  map[*net.Listener]struct{}
+	codecs     map[*rpc.ServerCodec]struct{}
 	rpcWg      sync.WaitGroup
 }
 
@@ -57,10 +58,33 @@ func (p *Service) trackListener(ln *net.Listener, add bool) bool {
 	return true
 }
 
+func (p *Service) trackCodec(codec *rpc.ServerCodec, add bool) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.codecs == nil {
+		p.codecs = make(map[*rpc.ServerCodec]struct{})
+	}
+	if add {
+		if p.shuttingDown() {
+			return false
+		}
+		p.codecs[codec] = struct{}{}
+	} else {
+		delete(p.codecs, codec)
+	}
+	return true
+}
+
 func (p *Service) numListeners() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.listeners)
+}
+
+func (p *Service) numCodecs() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.codecs)
 }
 
 func (p *Service) shuttingDown() bool {
@@ -103,10 +127,16 @@ func (p *Service) handleRpc(conn net.Conn) {
 		if err := recover(); err != nil {
 			logger.Error("recover: rpc server error: %s", err)
 		}
-		conn.Close()
 		p.rpcWg.Done()
 	}()
-	providerService.server.ServeCodec(jsonrpc.NewServerCodec(conn))
+	codec := codec2.NewJsonServerCodec(conn)
+	if !p.trackCodec(&codec, true) {
+		defer codec.Close()
+		return
+	}
+	defer p.trackCodec(&codec, false)
+
+	providerService.server.ServeCodec(codec)
 }
 
 func (p *Service) handleCheck(conn net.Conn) {
@@ -199,6 +229,8 @@ func (p *Service) Shutdown(ctx context.Context) error {
 
 	// 关闭所有打开的listener
 	lnerr := p.closeListenersLocked()
+	// 通知所有codec shutdown
+	p.shutdownAllCodecLocked()
 
 	// 等待已有线程结束
 	p.rpcWg.Wait()
@@ -210,7 +242,7 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	defer timer.Stop()
 	for {
 		// 没有打开的listener
-		if p.numListeners() == 0 {
+		if p.numListeners() == 0 && p.numCodecs() == 0 {
 			return lnerr
 		}
 		select {
@@ -219,5 +251,11 @@ func (p *Service) Shutdown(ctx context.Context) error {
 		case <-timer.C:
 			timer.Reset(utils.NextPollInterval(&pollIntervalBase))
 		}
+	}
+}
+
+func (p *Service) shutdownAllCodecLocked() {
+	for cd := range p.codecs {
+		(*cd).(*codec2.JsonServerCodec).Shutdown()
 	}
 }

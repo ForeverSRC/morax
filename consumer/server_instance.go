@@ -1,15 +1,17 @@
 package consumer
 
 import (
-	"errors"
 	"fmt"
-	"github.com/ForeverSRC/morax/loadbalance"
-	"github.com/ForeverSRC/morax/logger"
-	"github.com/ForeverSRC/morax/registry/consul"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"sort"
 	"sync"
+)
+
+import (
+	"github.com/ForeverSRC/morax/loadbalance"
+	"github.com/ForeverSRC/morax/logger"
+	"github.com/ForeverSRC/morax/registry/consul"
 )
 
 type providerInstance struct {
@@ -40,7 +42,7 @@ func (ps *ProviderInstances) LoadBalance(lbType string) (*rpc.Client, error) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	if ps.instances == nil {
-		return nil, errors.New(fmt.Sprintf("provider: %s zero instance", ps.providerName))
+		return nil, fmt.Errorf("provider: %s zero instance", ps.providerName)
 	}
 	inst, err := loadbalance.DoBalance(lbType, ps.ids)
 	if err != nil {
