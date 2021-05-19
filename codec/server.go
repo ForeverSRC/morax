@@ -143,12 +143,12 @@ func (c *JsonServerCodec) WriteResponse(r *rpc.Response, x interface{}) error {
 }
 
 func (c *JsonServerCodec) Close() error {
-	return c.conn.Close()
-}
-
-func (c *JsonServerCodec) Shutdown() {
 	if c.isClose.IsSet() {
-		return
+		return nil
 	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.isClose.SetTrue()
+	return c.conn.Close()
 }

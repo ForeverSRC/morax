@@ -229,8 +229,14 @@ func (p *Service) Shutdown(ctx context.Context) error {
 
 	// 关闭所有打开的listener
 	lnerr := p.closeListenersLocked()
+	if lnerr != nil {
+		logger.Error("close listeners error: %s", lnerr)
+	}
 	// 通知所有codec shutdown
-	p.shutdownAllCodecLocked()
+	cderr := p.shutdownAllCodecLocked()
+	if cderr != nil {
+		logger.Error("close listeners error: %s", cderr)
+	}
 
 	// 等待已有线程结束
 	p.rpcWg.Wait()
@@ -243,7 +249,7 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	for {
 		// 没有打开的listener
 		if p.numListeners() == 0 && p.numCodecs() == 0 {
-			return lnerr
+			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -254,8 +260,12 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	}
 }
 
-func (p *Service) shutdownAllCodecLocked() {
+func (p *Service) shutdownAllCodecLocked() error {
+	var err error
 	for cd := range p.codecs {
-		(*cd).(*codec2.JsonServerCodec).Shutdown()
+		if cerr := (*cd).Close(); cerr != nil && err == nil {
+			err = cerr
+		}
 	}
+	return err
 }
