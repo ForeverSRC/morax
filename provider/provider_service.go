@@ -127,8 +127,6 @@ func (p *Service) handleRpc(conn net.Conn) {
 		if err := recover(); err != nil {
 			logger.Error("recover: rpc server error: %s", err)
 		}
-		logger.Debug("rpc wait group sub 1")
-		p.rpcWg.Done()
 	}()
 	codec := codec2.NewJsonServerCodec(conn)
 	if !p.trackCodec(&codec, true) {
@@ -139,6 +137,8 @@ func (p *Service) handleRpc(conn net.Conn) {
 
 	providerService.server.ServeCodec(codec)
 	logger.Debug("rpc serve leave...")
+	p.rpcWg.Done()
+	logger.Debug("rpc wait group sub 1")
 }
 
 func (p *Service) handleCheck(conn net.Conn) {
