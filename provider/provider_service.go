@@ -75,12 +75,6 @@ func (p *Service) numListeners() int {
 	return len(p.listeners)
 }
 
-func (p *Service) numCodecs() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.codecs)
-}
-
 func (p *Service) shuttingDown() bool {
 	return p.inShutdown.IsSet()
 }
@@ -217,9 +211,6 @@ func (p *Service) Shutdown(ctx context.Context) error {
 
 	// 关闭所有打开的listener
 	lnerr := p.closeListenersLocked()
-	if lnerr != nil {
-		logger.Error("close listeners error: %s", lnerr)
-	}
 
 	p.mu.Unlock()
 
@@ -229,7 +220,7 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	for {
 		// 没有打开的listener
 		if p.closeIdleCodecs() && p.numListeners() == 0 {
-			return nil
+			return lnerr
 		}
 		select {
 		case <-ctx.Done():

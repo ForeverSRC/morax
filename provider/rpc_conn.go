@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"github.com/ForeverSRC/morax/logger"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -15,6 +16,7 @@ type RpcConn struct {
 func NewConn(conn net.Conn) *RpcConn {
 	rc := &RpcConn{rwc: conn}
 	rc.setState(http.StateNew)
+	logger.Debug("new conn StateNew")
 	return rc
 }
 
@@ -22,18 +24,21 @@ func (rc *RpcConn) Read(b []byte) (n int, err error) {
 	// 阻塞
 	n, err = rc.rwc.Read(b)
 	rc.setState(http.StateActive)
+	logger.Debug("conn StateActive")
 	return n, err
 }
 
 func (rc *RpcConn) Write(b []byte) (n int, err error) {
 	n, err = rc.rwc.Write(b)
 	rc.setState(http.StateIdle)
+	logger.Debug("conn StateIdle")
 	return n, err
 }
 
 func (rc *RpcConn) Close() error {
 	err := rc.rwc.Close()
 	rc.setState(http.StateClosed)
+	logger.Debug("conn StateClosed")
 	return err
 }
 

@@ -5,6 +5,7 @@ package provider
 import (
 	"encoding/json"
 	"errors"
+	"github.com/ForeverSRC/morax/logger"
 	"io"
 	"net/http"
 	"net/rpc"
@@ -163,6 +164,8 @@ func (c *JsonServerCodec) CloseIdle() (bool, error) {
 	}
 
 	st, unixSec := (c.conn).(*RpcConn).GetState()
+	logger.Debug("server: %s codec closeIdle state: %s", c.server.id, st.String())
+
 	if st == http.StateNew && unixSec < time.Now().Unix()-5 {
 		st = http.StateIdle
 	}
