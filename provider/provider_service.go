@@ -11,7 +11,6 @@ import (
 )
 
 import (
-	codec2 "github.com/ForeverSRC/morax/codec"
 	"github.com/ForeverSRC/morax/common/types"
 	"github.com/ForeverSRC/morax/common/utils"
 	cp "github.com/ForeverSRC/morax/config/provider"
@@ -27,8 +26,7 @@ type Service struct {
 	inShutdown types.AtomicBool
 	mu         sync.Mutex
 	listeners  map[*net.Listener]struct{}
-	codecs     map[*rpc.ServerCodec]struct{}
-	rpcWg      sync.WaitGroup
+	codecs     map[*JsonServerCodec]struct{}
 }
 
 func (p *Service) closeListenersLocked() error {
@@ -58,21 +56,17 @@ func (p *Service) trackListener(ln *net.Listener, add bool) bool {
 	return true
 }
 
-func (p *Service) trackCodec(codec *rpc.ServerCodec, add bool) bool {
+func (p *Service) TrackCodec(codec *JsonServerCodec, add bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.codecs == nil {
-		p.codecs = make(map[*rpc.ServerCodec]struct{})
+		p.codecs = make(map[*JsonServerCodec]struct{})
 	}
 	if add {
-		if p.shuttingDown() {
-			return false
-		}
 		p.codecs[codec] = struct{}{}
 	} else {
 		delete(p.codecs, codec)
 	}
-	return true
 }
 
 func (p *Service) numListeners() int {
@@ -99,7 +93,6 @@ func InitRpcService(c *cp.ProviderConfig) {
 		RpcAddr:   fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Port),
 		CheckAddr: fmt.Sprintf("%s:%d", c.Service.Host, c.Service.Check.CheckPort),
 		server:    rpc.NewServer(),
-		rpcWg:     sync.WaitGroup{},
 	}
 	providerService.inShutdown.SetFalse()
 }
@@ -128,16 +121,11 @@ func (p *Service) handleRpc(conn net.Conn) {
 			logger.Error("recover: rpc server error: %s", err)
 		}
 	}()
-	codec := codec2.NewJsonServerCodec(conn)
-	if !p.trackCodec(&codec, true) {
-		codec.Close()
-		return
-	}
-	defer p.trackCodec(&codec, false)
+	rc := NewConn(conn)
+	codec := NewJsonServerCodec(rc, p)
 
 	providerService.server.ServeCodec(codec)
-	logger.Debug("rpc wait group sub 1")
-	p.rpcWg.Done()
+	logger.Debug("rpc serve codec return")
 }
 
 func (p *Service) handleCheck(conn net.Conn) {
@@ -175,8 +163,6 @@ func (p *Service) serveRpc() {
 			logger.Error("accept error: %s", cErr)
 			continue
 		}
-		p.rpcWg.Add(1)
-		logger.Debug("rpc wait group add 1")
 		go p.handleRpc(conn)
 	}
 }
@@ -234,14 +220,6 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	if lnerr != nil {
 		logger.Error("close listeners error: %s", lnerr)
 	}
-	// 通知所有codec shutdown
-	cderr := p.shutdownAllCodecLocked()
-	if cderr != nil {
-		logger.Error("close listeners error: %s", cderr)
-	}
-
-	// 等待已有线程结束
-	p.rpcWg.Wait()
 
 	p.mu.Unlock()
 
@@ -250,7 +228,7 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	defer timer.Stop()
 	for {
 		// 没有打开的listener
-		if p.numListeners() == 0 && p.numCodecs() == 0 {
+		if p.closeIdleCodecs() && p.numListeners() == 0 {
 			return nil
 		}
 		select {
@@ -262,12 +240,15 @@ func (p *Service) Shutdown(ctx context.Context) error {
 	}
 }
 
-func (p *Service) shutdownAllCodecLocked() error {
-	var err error
+func (p *Service) closeIdleCodecs() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	quiescent := true
+
 	for cd := range p.codecs {
-		if cerr := (*cd).Close(); cerr != nil && err == nil {
-			err = cerr
-		}
+		flag, _ := cd.CloseIdle()
+		quiescent = quiescent && flag
 	}
-	return err
+
+	return quiescent
 }
