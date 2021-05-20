@@ -136,9 +136,8 @@ func (p *Service) handleRpc(conn net.Conn) {
 	defer p.trackCodec(&codec, false)
 
 	providerService.server.ServeCodec(codec)
-	logger.Debug("rpc serve leave...")
-	p.rpcWg.Done()
 	logger.Debug("rpc wait group sub 1")
+	p.rpcWg.Done()
 }
 
 func (p *Service) handleCheck(conn net.Conn) {
