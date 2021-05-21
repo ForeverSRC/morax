@@ -1,4 +1,4 @@
-package codec
+package provider
 
 // 在net/rpc/jsonrpc 包基础上进行改进
 
@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"net/rpc"
 	"sync"
+	"time"
 )
 
 import (
@@ -33,17 +35,20 @@ type JsonServerCodec struct {
 	seq     uint64
 	pending map[uint64]*json.RawMessage
 	isClose types.AtomicBool
+	server  *Service
 }
 
 // NewJsonServerCodec returns a new rpc.ServerCodec using JSON-RPC on conn.
-func NewJsonServerCodec(conn io.ReadWriteCloser) rpc.ServerCodec {
+func NewJsonServerCodec(conn io.ReadWriteCloser, p *Service) rpc.ServerCodec {
 	cd := &JsonServerCodec{
 		dec:     json.NewDecoder(conn),
 		enc:     json.NewEncoder(conn),
 		conn:    conn,
 		pending: make(map[uint64]*json.RawMessage),
+		server:  p,
 	}
 	cd.isClose.SetFalse()
+	p.TrackCodec(cd, true)
 	return cd
 }
 
@@ -68,9 +73,6 @@ type serverResponse struct {
 // net/rpc 的 rpc.Server 首先调用ReadRequestHeader 将读取到的请求头部进行解码
 // 如果此方法返回错误，且为 io.EOF 或 io.ErrUnexpectedEOF 则返回，且不再读取req
 // 此时 rpc.Server 跳出循环，不再接受任何请求，等待其余请求结束后关闭codec
-
-// codec 可以对外提供一个API 标志即将关闭，将 rpc.ServerCodec 让ReadRequestHeader等返回 io.EOF
-// WriteResponse 只需正常运行
 func (c *JsonServerCodec) ReadRequestHeader(r *rpc.Request) error {
 	// 判断是否处于关闭状态
 	if c.isClose.IsSet() {
@@ -119,6 +121,7 @@ func (c *JsonServerCodec) ReadRequestBody(x interface{}) error {
 
 var null = json.RawMessage([]byte("null"))
 
+// 并发调用
 func (c *JsonServerCodec) WriteResponse(r *rpc.Response, x interface{}) error {
 	c.mutex.Lock()
 	b, ok := c.pending[r.Seq]
@@ -147,8 +150,28 @@ func (c *JsonServerCodec) Close() error {
 		return nil
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
 	c.isClose.SetTrue()
-	return c.conn.Close()
+	err := c.conn.Close()
+	c.server.TrackCodec(c, false)
+	return err
+}
+
+func (c *JsonServerCodec) closeIdle() (bool, error) {
+	if c.isClose.IsSet() {
+		return true, nil
+	}
+
+	st, unixSec := (c.conn).(*rpcConn).getState()
+
+	if st == http.StateNew && unixSec < time.Now().Unix()-5 {
+		st = http.StateIdle
+	}
+	if st != http.StateIdle || unixSec == 0 {
+		return false, nil
+	}
+	c.isClose.SetTrue()
+	err := c.conn.Close()
+	c.server.TrackCodec(c, false)
+	return true, err
+
 }
