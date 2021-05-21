@@ -24,7 +24,7 @@ type Service struct {
 	CheckAddr  string
 	server     *rpc.Server
 	inShutdown types.AtomicBool
-	mu         sync.Mutex
+	mu         sync.Mutex //protect listeners codecs
 	listeners  map[*net.Listener]struct{}
 	codecs     map[*JsonServerCodec]struct{}
 }
@@ -141,6 +141,7 @@ func (p *Service) serveRpc() {
 	if !p.trackListener(&listener, true) {
 		return
 	}
+	// 关闭listener后 accept返回，goroutine退出，移除listener
 	defer p.trackListener(&listener, false)
 
 	for {
@@ -174,6 +175,7 @@ func (p *Service) serveCheck() {
 	if !p.trackListener(&listener, true) {
 		return
 	}
+	// 关闭listener后 accept返回，goroutine退出，移除listener
 	defer p.trackListener(&listener, false)
 
 	for {
@@ -232,8 +234,6 @@ func (p *Service) Shutdown(ctx context.Context) error {
 }
 
 func (p *Service) closeIdleCodecs() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	quiescent := true
 
 	for cd := range p.codecs {
