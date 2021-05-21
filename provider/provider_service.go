@@ -238,6 +238,7 @@ func (p *Service) closeIdleCodecs() bool {
 
 	for cd := range p.codecs {
 		flag, _ := cd.CloseIdle()
+		logger.Debug("conn Close idle result:%v", flag)
 		quiescent = quiescent && flag
 	}
 

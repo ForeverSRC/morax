@@ -174,6 +174,7 @@ func (c *JsonServerCodec) CloseIdle() (bool, error) {
 	}
 	c.isClose.SetTrue()
 	err := c.conn.Close()
+	logger.Debug("server: %s codec close", c.server.id)
 	c.server.TrackCodec(c, false)
 	return true, err
 
