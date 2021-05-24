@@ -89,7 +89,7 @@ func (ps *ProviderInstances) Watch() <-chan bool {
 	services, meta, err := consul.FindServers(ps.providerName, ps.idx)
 	logger.Debug("Servers find return")
 
-	resCh := make(chan bool)
+	resCh := make(chan bool, 1)
 	defer close(resCh)
 	ps.mu.Lock()
 	defer ps.mu.Unlock()

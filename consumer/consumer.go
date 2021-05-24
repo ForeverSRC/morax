@@ -148,7 +148,7 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 					callFailCh <- err
 				}
 
-				resCh := make(chan []reflect.Value)
+				resCh := make(chan []reflect.Value, 1)
 				// 服务发现
 				providerInstances, ok := c.providers[name]
 				if !ok {
