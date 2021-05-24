@@ -134,12 +134,10 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 
 			callSuccessCh := make(chan []reflect.Value)
 			callFailCh := make(chan error)
-			defer close(callSuccessCh)
 			defer close(callFailCh)
+			defer close(callSuccessCh)
 
-			ctx, cancel := context.WithCancel(c.ctx)
-
-			core := func(ctx context.Context) {
+			core := func(ctx context.Context) <-chan []reflect.Value {
 				defer func() {
 					if e := recover(); e != nil {
 						logger.Error("recover: rpc call panic:%v", e)
@@ -150,6 +148,7 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 					callFailCh <- err
 				}
 
+				resCh := make(chan []reflect.Value)
 				// 服务发现
 				providerInstances, ok := c.providers[name]
 				if !ok {
@@ -160,6 +159,7 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 				client, err := providerInstances.LoadBalance(info.LBType)
 				if err != nil {
 					parseErr(err)
+					return nil
 				}
 
 				// 调用
@@ -167,10 +167,11 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 				err = client.Call(serviceMethod, args[0].Interface(), resp.Interface())
 				if err != nil {
 					parseErr(err)
-					return
+					return nil
 				}
 
-				callSuccessCh <- []reflect.Value{resp.Elem(), reflect.Zero(reflect.TypeOf(RpcError{}))}
+				resCh <- []reflect.Value{resp.Elem(), reflect.Zero(reflect.TypeOf(RpcError{}))}
+				return resCh
 			}
 
 			invoke := func(ctx context.Context, timer *time.Timer, isRetry bool) {
@@ -178,39 +179,40 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 					timer.Reset(time.Millisecond * time.Duration(info.Timeout))
 				}
 
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-						core(ctx)
-						return
-					}
+				select {
+				case res := <-core(ctx):
+					callSuccessCh <- res
+					return
+				case <-ctx.Done():
+					return
 				}
+
 			}
 
 			// 实际调用过程
+			callCtx, callCancel := context.WithCancel(c.ctx)
 			count := 0
 			timer := time.NewTimer(time.Millisecond * time.Duration(info.Timeout))
-			go invoke(ctx, timer, false)
+			go invoke(callCtx, timer, false)
 
 			for {
 				select {
 				case res := <-callSuccessCh:
 					{
 						timer.Stop()
-						cancel()
+						callCancel()
 						return res
 
 					}
 				case fail := <-callFailCh:
 					{
 						timer.Stop()
-						cancel()
+						callCancel()
 						// todo: 失败重试
 						if count < info.Retries {
 							count++
-							go invoke(ctx, timer, true)
+							callCtx, callCancel = context.WithCancel(c.ctx)
+							go invoke(callCtx, timer, true)
 						} else {
 							return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{
 								Err: fail,
@@ -220,11 +222,12 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 				case <-timer.C:
 					{
 						timer.Stop()
-						cancel()
+						callCancel()
 						// todo: 超时重试
 						if count < info.Retries {
 							count++
-							go invoke(ctx, timer, true)
+							callCtx, callCancel = context.WithCancel(c.ctx)
+							go invoke(callCtx, timer, true)
 						} else {
 							return []reflect.Value{reflect.Zero(*rTyp), reflect.ValueOf(RpcError{Err: errors.New("rpc call time out")})}
 						}
@@ -242,13 +245,14 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 		c.providers[name] = pss
 		ctx, cancel := context.WithCancel(c.ctx)
 		c.watcherCtx[&ctx] = cancel
+
 		go func(ctx context.Context) {
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				default:
-					pss.Watch()
+				case <-pss.Watch():
+					continue
 				}
 			}
 		}(ctx)

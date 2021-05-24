@@ -14,17 +14,23 @@ res, rpcErr := p.Hello(HelloRequest{Target: "World"})
 
 ## 内部实现
 
-注册Consumer时，内部通过反射对结构体中每个`func`成员进行赋值，实现rpc call。
+![](./img/consumer_graph.png)
 
-#### 1.校验结构体字段
+### 1.初始化
 
-传入结构体实例的指针后，通过反射获取此结构体的成员信息并进行校验，校验规则：
+读取配置信息。
+
+### 2.注册消费的方法
+
+通过反射对结构体中每个`func`成员进行赋值，实现rpc call。
+
+首先对传入的结构体进行校验：
 
 * 字段类型为`reflect.Func`
 * 必须有1个入参，且入参类型为`reflect.Struct`
 * 必须有2个返回值，且第一个返回值类型为`reflect.Struct`
 
-#### 2.组装rpc方法信息
+#### 改写rpc方法信息
 
 每个方法对应的信息包括：
 
@@ -34,29 +40,21 @@ res, rpcErr := p.Hello(HelloRequest{Target: "World"})
 
 根据配置粒度大小的规则，获得每个方法的核心信息。
 
-#### 3.实现rpc call过程
+##### 服务发现
 
-通过`reflect.MakeFunc`生成进行rpc call的实现函数并赋值到对应的结构体字段中。
+morax consumer启动单独的goroutine对consul注册中心进行长轮询，将获取到的消费端订阅的服务实例信息同步到消费端的存储中。
 
-rpc call过程包括：
+详见“长轮询监听服务提供者”一节。
 
-```mermaid
-graph TD
-A[服务发现]-->B[负载均衡]
-B-->C[超时监控调用]
-```
+##### 负载均衡
 
-##### 超时重试
+通过配置文件指定的负载均衡算法，选出对应的`net/rpc` client实例。
 
-采用go的`time.Timer`进行定时。
+##### 调用
 
-实现rpc call的方法通过三个channel传递调用结果：
+同步调用通过`client.Call()`方法实现
 
-* callSuccessCh：rpc call成功后，将结果写入此channel中
-* callFailCh：rpc call返回error，将error信息写入此channel中
-* timer.C：超时channel
-
-当发生超时时，应及时终止调用逻辑，因此，执行rpc call的函数采用context实现取消：
+当超时发生，或调用失败，应及时终止调用逻辑，因此，执行rpc call的函数采用context实现取消：
 
 ```go
 invoke := func(ctx context.Context, timer *time.Timer, isRetry bool) {
@@ -75,4 +73,22 @@ invoke := func(ctx context.Context, timer *time.Timer, isRetry bool) {
   }
 }
 ```
+
+##### 失败/超时重试
+
+上述`invoke`函数将在单独的goroutine中执行，通过三个channel传递调用结果：
+
+* callSuccessCh：rpc call成功后，将结果写入此channel中
+* callFailCh：rpc call返回error，将error信息写入此channel中
+* timer.C：超时channel
+
+通过select语句监听每个通道，当失败或超时发生，根据设定的重试次数进行重试。
+
+*TODO：实现重试时重新选择服务实例*
+
+#### 长轮询监听服务提供者实例
+
+consul不具有推送服务状态变更的功能，需要通过长轮询机制去监听服务提供者实例的变更。
+
+morax中，该过程将在一个goroutine中实现。
 

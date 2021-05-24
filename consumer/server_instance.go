@@ -83,24 +83,28 @@ func (ps *ProviderInstances) setInstancesIds() {
 	ps.ids = ids
 }
 
-func (ps *ProviderInstances) Watch() bool {
+func (ps *ProviderInstances) Watch() <-chan bool {
 	logger.Debug("Servers find start")
 	// 阻塞
 	services, meta, err := consul.FindServers(ps.providerName, ps.idx)
 	logger.Debug("Servers find return")
 
+	resCh := make(chan bool)
+	defer close(resCh)
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	if err != nil {
 		logger.Error("find provider %s error:%s", ps.providerName, err)
 		ps.instances = nil
-		return false
+		resCh <- false
+		return resCh
 	}
 
 	if len(services) == 0 {
 		logger.Warn("find service: %s instance zero!", ps.providerName)
 		ps.instances = nil
-		return false
+		resCh <- false
+		return resCh
 	}
 
 	mp := make(map[string]*providerInstance)
@@ -135,5 +139,6 @@ func (ps *ProviderInstances) Watch() bool {
 
 	ps.setIndexLocked(meta.LastIndex, meta.LastIndex < ps.idx)
 
-	return true
+	resCh <- true
+	return resCh
 }
