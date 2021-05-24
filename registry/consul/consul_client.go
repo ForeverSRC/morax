@@ -1,6 +1,7 @@
 package consul
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -66,9 +67,11 @@ func Register(info *cp.ProviderConfig) error {
 
 }
 
-func FindServers(name string, idx uint64) ([]*consulapi.ServiceEntry, *consulapi.QueryMeta, error) {
+func FindServers(ctx context.Context, name string, idx uint64) ([]*consulapi.ServiceEntry, *consulapi.QueryMeta, error) {
+	qo := &consulapi.QueryOptions{WaitIndex: idx}
+	qo = qo.WithContext(ctx)
 	// 阻塞
-	return clientInfo.consulClient.Health().Service(name, "", true, &consulapi.QueryOptions{WaitIndex: idx})
+	return clientInfo.consulClient.Health().Service(name, "", true, qo)
 }
 
 func Deregister(id string) error {
@@ -77,4 +80,5 @@ func Deregister(id string) error {
 
 func CloseIdleConn() {
 	clientInfo.httpClient.CloseIdleConnections()
+	clientInfo.consulClient.PreparedQuery()
 }

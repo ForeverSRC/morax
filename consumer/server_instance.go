@@ -1,6 +1,7 @@
 package consumer
 
 import (
+	"context"
 	"fmt"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -83,10 +84,10 @@ func (ps *ProviderInstances) setInstancesIds() {
 	ps.ids = ids
 }
 
-func (ps *ProviderInstances) Watch() <-chan bool {
+func (ps *ProviderInstances) Watch(ctx context.Context) <-chan bool {
 	logger.Debug("Servers find start")
 	// 阻塞
-	services, meta, err := consul.FindServers(ps.providerName, ps.idx)
+	services, meta, err := consul.FindServers(ctx, ps.providerName, ps.idx)
 	logger.Debug("Servers find return")
 
 	resCh := make(chan bool, 1)

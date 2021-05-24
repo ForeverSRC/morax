@@ -250,8 +250,9 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 			for {
 				select {
 				case <-ctx.Done():
+					logger.Debug("watcher cancel!")
 					return
-				case <-pss.Watch():
+				case <-pss.Watch(ctx):
 					continue
 				}
 			}
