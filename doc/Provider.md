@@ -156,7 +156,9 @@ func GetLocalAddr() (string, error) {
 
 #### rpc服务
 
-对于每个客户端的链接，服务端启动一个新的goroutine进行服务，同时使用`sync.WaitGroup`等待每个处理消费者链接的goroutine。
+对于每个新的消费者的链接，服务端启动一个新的goroutine进行服务。
+
+`net/rpc`包中，默认客户端和服务端之间通过单一长链接进行通信，因此，morax的消费者和提供者之间也默认采用单一长链接。
 
 ### 6.优雅关机
 
@@ -177,3 +179,80 @@ rpc 服务端优雅关机原理
 
 ![](./img/provider_shutdown.png)
 
+主要参考`net/http`包中的`Shutdown()`方法。
+
+#### provider端实现
+
+`net/rpc`包中，默认客户端主动关闭链接，服务端没有对应的API主动关闭链接。morax通过自定义的编解码器(`rpc.ServerCodec`)和链接(`net.Conn`)实现链接的主动关闭。
+
+##### 自定义链接
+
+参考并使用`net/http`包中的链接状态(`ConnState`)，对一个`net.Conn`接口的实例进行包装：
+
+```go
+type rpcConn struct {
+	curState struct{ atomic uint64 }
+	rwc      net.Conn
+}
+```
+
+**状态转换**
+
+![](./img/conn_state.png)
+
+设置与获取状态的方法参考`net/http`包的实现：
+
+```go
+func (rc *rpcConn) setState(state http.ConnState) {
+	if state > 0xff || state < 0 {
+		panic("internal error")
+	}
+	packedState := uint64(time.Now().Unix()<<8) | uint64(state)
+	atomic.StoreUint64(&rc.curState.atomic, packedState)
+}
+
+func (rc *rpcConn) getState() (state http.ConnState, unixSec int64) {
+	packedState := atomic.LoadUint64(&rc.curState.atomic)
+	return http.ConnState(packedState & 0xff), int64(packedState >> 8)
+}
+```
+
+##### 自定义编解码器
+
+编解码器对应通信协议，目前morax基于json协议进行通信。参考`net/rpc/jsonrpc`包中的`serverCodec`实现，自定义服务端编解码器：
+
+```go
+type JsonServerCodec struct {
+	dec  *json.Decoder // for reading JSON values
+	enc  *json.Encoder // for writing JSON values
+	conn io.Closer
+
+	req serverRequest
+
+	mutex   sync.Mutex // protects seq, pending
+	seq     uint64
+	pending map[uint64]*json.RawMessage
+  // 新增
+	isClose types.AtomicBool
+	server  *Service
+}
+```
+
+其中，`isClose`维护编解码器的关闭状态，`server`指针用于使用当前编解码器的rpc server跟踪当前编解码器。
+
+* 调用`ReadRequestHeader()`时，如果编解码器处于关闭状态，则返回`io.EOF`
+* 调用`ReadRequestBody()`时，如果编解码器处于关闭状态，则返回`io.EOF`
+* 调用`Close()`时，如果编解码器已经处于关闭状态，则返回，避免重复关闭
+
+**关闭空闲链接**
+
+主要步骤如下：
+
+* 判断编解码器是否处于关闭状态，避免重复关闭
+* 获取当前编解码器绑定的链接的状态
+* 判断是否为空闲态，或处于新建态超过了一定时间
+  * 参考`net/http`包
+* 关闭处于空闲态的链接
+  * 关闭编解码器（`Close()`方法）的实质即为关闭编解码器绑定的链接
+* 将编解码器置为关闭态
+* 从server中移除编解码器
