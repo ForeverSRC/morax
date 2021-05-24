@@ -25,12 +25,6 @@ type JsonServerCodec struct {
 
 	req serverRequest
 
-	// JSON-RPC clients can use arbitrary json values as request IDs.
-	// Package rpc expects uint64 request IDs.
-	// We assign uint64 sequence numbers to incoming requests
-	// but save the original request ID in the pending map.
-	// When rpc responds, we use the sequence number in
-	// the response to find the original request ID.
 	mutex   sync.Mutex // protects seq, pending
 	seq     uint64
 	pending map[uint64]*json.RawMessage
@@ -38,7 +32,6 @@ type JsonServerCodec struct {
 	server  *Service
 }
 
-// NewJsonServerCodec returns a new rpc.ServerCodec using JSON-RPC on conn.
 func NewJsonServerCodec(conn io.ReadWriteCloser, p *Service) rpc.ServerCodec {
 	cd := &JsonServerCodec{
 		dec:     json.NewDecoder(conn),
@@ -85,9 +78,6 @@ func (c *JsonServerCodec) ReadRequestHeader(r *rpc.Request) error {
 	}
 	r.ServiceMethod = c.req.Method
 
-	// JSON request id can be any JSON value;
-	// RPC package expects uint64.  Translate to
-	// internal uint64 and save JSON on the side.
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.seq++
@@ -110,10 +100,7 @@ func (c *JsonServerCodec) ReadRequestBody(x interface{}) error {
 	if c.req.Params == nil {
 		return errMissingParams
 	}
-	// JSON params is array value.
-	// RPC params is struct.
-	// Unmarshal into array containing struct for now.
-	// Should think about making RPC more general.
+
 	var params [1]interface{}
 	params[0] = x
 	return json.Unmarshal(*c.req.Params, &params)
