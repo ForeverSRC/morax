@@ -40,19 +40,25 @@ res, rpcErr := p.Hello(HelloRequest{Target: "World"})
 
 根据配置粒度大小的规则，获得每个方法的核心信息。
 
-##### 服务发现
+##### 核心逻辑
+
+核心逻辑被封装在一个匿名函数中。rpc call成功时，返回一个`<-chan []reflect.Value`，失败时则返回`nil`通道，同时向`callFailCh`写入错误信息。具体调用过程如下：
+
+**(1) 服务发现**
 
 morax consumer启动单独的goroutine对consul注册中心进行长轮询，将获取到的消费端订阅的服务实例信息同步到消费端的存储中。
 
-详见“长轮询监听服务提供者”一节。
+详见**“长轮询监听服务提供者”**。
 
-##### 负载均衡
+**(2) 负载均衡**
 
 通过配置文件指定的负载均衡算法，选出对应的`net/rpc` client实例。
 
-##### 调用
+**(3) 调用**
 
 同步调用通过`client.Call()`方法实现
+
+##### 失败/超时重试
 
 当超时发生，或调用失败，应及时终止调用逻辑，因此，执行rpc call的函数采用context实现取消：
 
@@ -62,19 +68,16 @@ invoke := func(ctx context.Context, timer *time.Timer, isRetry bool) {
     timer.Reset(time.Millisecond * time.Duration(info.Timeout))
   }
 
-  for {
-    select {
-      case <-ctx.Done():
-      return
-      default:
-      core(ctx)
-      return
-    }
+  select {
+    case res := <-core(ctx):
+    callSuccessCh <- res
+    return
+    case <-ctx.Done():
+    return
   }
+
 }
 ```
-
-##### 失败/超时重试
 
 上述`invoke`函数将在单独的goroutine中执行，通过三个channel传递调用结果：
 
@@ -90,5 +93,66 @@ invoke := func(ctx context.Context, timer *time.Timer, isRetry bool) {
 
 consul不具有推送服务状态变更的功能，需要通过长轮询机制去监听服务提供者实例的变更。
 
-morax中，该过程将在一个goroutine中实现。
+morax中，该过程将在一个goroutine中实现，并通过传递`context.Context`实现取消：
+
+```go
+go func(ctx context.Context) {
+  for {
+    select {
+      case <-ctx.Done():
+      return
+      case <-pss.Watch(ctx):
+      continue
+    }
+  }
+}(ctx)
+```
+
+`pss.Watch(ctx)`中，通过HTTP长轮询的方式监控服务提供者实例的状态
+
+```go
+// 阻塞
+services, meta, err := consul.FindServers(ctx, ps.providerName, ps.idx)
+```
+
+`consul.FinderServers()`函数中，通过如下方式：
+
+```go
+func FindServers(ctx context.Context, name string, idx uint64) ([]*consulapi.ServiceEntry, *consulapi.QueryMeta, error) {
+	qo := &consulapi.QueryOptions{WaitIndex: idx}
+	qo = qo.WithContext(ctx)
+	// 阻塞
+	return clientInfo.consulClient.Health().Service(name, "", true, qo)
+}
+```
+
+传入`context`，实现取消功能，即底层的`http.Request.WithContext()`
+
+#### 提供者变更时更新本地存储
+
+提供者实例发生变化时，`clientInfo.consulClient.Health().Service(name, "", true, qo)`即返回，如果存在错误，或者无实例，则消费者存储置为`nil`
+
+当成功返回实例信息时，将之前的信息与当前信息进行比较：
+
+* 之前不存在而现在存在的实例进行新增
+* 之前存在现在不存在的要剔除
+* 之前存在现在也存在的实例不变
+
+其中，“新增”是指创建新的`rpc.Client`，删除是指，关闭已有的`rpc.Client`，同时从本地存储中移除。
+
+同时，存储返回的`index`，便于下一次请求使用。
+
+除存储实例信息，也需要更新实例Id的列表，便于进行负载均衡。
+
+### 3.调用方法
+
+完成消费方法注册后，传入的结构体的成员字段即获得了新的赋值。即可通过此结构体进行rpc调用。
+
+### 4.优雅关机
+
+消费者服务下线时，需要进行优雅关机，释放对应资源，包括：
+
+* rpc client包含的goroutine和http connections
+* 监控服务端实例信息的watcher goroutine本身和其中consul client包含的http client
+* consul client底层的http client的idle connections
 
