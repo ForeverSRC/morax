@@ -48,10 +48,14 @@ func (ms *MoraxService) InitService(sf *cs.ServiceConfig, ctx context.Context) e
 	} else {
 		ms.host = sf.Host
 	}
-	ms.id = sf.GenerateID()
 	ms.rpcPort = DEFAULT_SERVICE_PORT
 	ms.ctx = ctx
 	return nil
+}
+
+func (ms *MoraxService) generateId() string {
+	ms.id = fmt.Sprintf("%s-%s:%d", ms.name, ms.host, ms.rpcPort)
+	return ms.id
 }
 
 // InitHealthCheck 初始化健康检查服务
@@ -120,7 +124,7 @@ func (ms *MoraxService) ListenAndServe() error {
 
 func (ms *MoraxService) genRegistration() *consulapi.AgentServiceRegistration {
 	registration := new(consulapi.AgentServiceRegistration)
-	registration.ID = ms.id
+	registration.ID = ms.generateId()
 	registration.Name = ms.name
 	registration.Port = ms.rpcPort
 	registration.Address = ms.host
