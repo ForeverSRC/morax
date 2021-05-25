@@ -29,10 +29,10 @@ type JsonServerCodec struct {
 	seq     uint64
 	pending map[uint64]*json.RawMessage
 	isClose types.AtomicBool
-	server  *Service
+	server  *RpcProvider
 }
 
-func NewJsonServerCodec(conn io.ReadWriteCloser, p *Service) rpc.ServerCodec {
+func NewJsonServerCodec(conn io.ReadWriteCloser, p *RpcProvider) rpc.ServerCodec {
 	cd := &JsonServerCodec{
 		dec:     json.NewDecoder(conn),
 		enc:     json.NewEncoder(conn),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ForeverSRC/morax/registry/consul"
 	"reflect"
 	"sync"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 import (
 	"github.com/ForeverSRC/morax/common/types"
-	"github.com/ForeverSRC/morax/common/utils"
 	cc "github.com/ForeverSRC/morax/config/consumer"
 	. "github.com/ForeverSRC/morax/error"
 	"github.com/ForeverSRC/morax/logger"
@@ -29,13 +27,7 @@ type RpcConsumer struct {
 	allClientClose bool
 }
 
-var consumer *RpcConsumer
-
-func NewRpcConsumer(config *cc.ConsumerConfig) {
-	consumer = consumer.NewRpcConsumer(context.Background(), config)
-}
-
-func (c *RpcConsumer) NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
+func NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
 	con := &RpcConsumer{
 		conf:       config,
 		providers:  make(map[string]*ProviderInstances),
@@ -46,14 +38,11 @@ func (c *RpcConsumer) NewRpcConsumer(ctx context.Context, config *cc.ConsumerCon
 	return con
 }
 
-func Shutdown(ctx context.Context) error {
-	return consumer.Shutdown(ctx)
-}
-
-func (c *RpcConsumer) Shutdown(ctx context.Context) error {
+func (c *RpcConsumer) Shutdown() {
 	// 设置标志位
 	c.inShutdown.SetTrue()
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	// 关闭所有rpc client
 	// net/rpc包中 Client的close方法会通过加锁的机制，阻塞等待当前send完成
 	c.closeAllClientLock()
@@ -61,27 +50,6 @@ func (c *RpcConsumer) Shutdown(ctx context.Context) error {
 	for _, cancel := range c.watcherCtx {
 		cancel()
 	}
-	// 关闭consul client的idle connection
-	consul.CloseIdleConn()
-	c.mu.Unlock()
-
-	pollIntervalBase := time.Millisecond
-	timer := time.NewTimer(utils.NextPollInterval(&pollIntervalBase))
-	defer timer.Stop()
-	for {
-		// 没有打开的rpc client
-		if c.allClientClose {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			timer.Reset(utils.NextPollInterval(&pollIntervalBase))
-		}
-	}
-
 }
 
 func (c *RpcConsumer) closeAllClientLock() {
@@ -93,11 +61,7 @@ func (c *RpcConsumer) closeAllClientLock() {
 	c.allClientClose = true
 }
 
-func RegistryConsumer(name string, service interface{}) error {
-	return consumer.RegistryConsumer(name, service)
-}
-
-func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
+func (c *RpcConsumer) RegisterConsumer(name string, service interface{}) error {
 	//获得传入结构体指针实际指向的结构体
 	s := reflect.ValueOf(service).Elem()
 	if s.Kind() != reflect.Struct {
