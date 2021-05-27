@@ -23,16 +23,14 @@ type RpcConsumer struct {
 	inShutdown     types.AtomicBool
 	mu             sync.Mutex
 	ctx            context.Context
-	watcherCtx     map[*context.Context]context.CancelFunc
 	allClientClose bool
 }
 
 func NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
 	con := &RpcConsumer{
-		conf:       config,
-		providers:  make(map[string]*ProviderInstances),
-		ctx:        ctx,
-		watcherCtx: make(map[*context.Context]context.CancelFunc),
+		conf:      config,
+		providers: make(map[string]*ProviderInstances),
+		ctx:       ctx,
 	}
 	con.inShutdown.SetFalse()
 	return con
@@ -47,8 +45,8 @@ func (c *RpcConsumer) Shutdown() {
 	// net/rpc包中 Client的close方法会通过加锁的机制，阻塞等待当前send完成
 	c.closeAllClientLock()
 	// 停止所有watcher
-	for _, cancel := range c.watcherCtx {
-		cancel()
+	for _, p := range c.providers {
+		p.Cancel()
 	}
 }
 
@@ -203,26 +201,22 @@ func (c *RpcConsumer) RegisterConsumer(name string, service interface{}) error {
 		field.Set(mf)
 	}
 
-	// 设置并启动监，避免对同一个provider多次设定监听
+	// 设置监听
 	if _, ok := c.providers[name]; !ok {
 		pss := NewProviderInstances(name)
-		c.providers[name] = pss
 		ctx, cancel := context.WithCancel(c.ctx)
-		c.watcherCtx[&ctx] = cancel
-
-		go func(ctx context.Context) {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-pss.Watch(ctx):
-					continue
-				}
-			}
-		}(ctx)
+		pss.Ctx = ctx
+		pss.Cancel = cancel
+		c.providers[name] = pss
 	}
 
 	return nil
+}
+
+func (c *RpcConsumer) StartWatch() {
+	for _, v := range c.providers {
+		go v.StartWatcher()
+	}
 }
 
 func checkMethodField(field *reflect.Value) (*reflect.Type, error) {

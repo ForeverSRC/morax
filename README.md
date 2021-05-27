@@ -2,7 +2,7 @@
 ## 概述
 基于`net/rpc`的go语言rpc框架。
 
-角色：
+每个服务对应一个`MoraxService`，其中包括：
 
 * provider
     * 服务提供者
@@ -11,6 +11,8 @@
 * registry
     * 注册中心
     * Morax基于consul注册中心
+* HealthCheckService
+    * 健康检查服务，支持tcp模式的consul健康检查
 
 ## 快速开始
 ### provider
@@ -58,17 +60,21 @@ type HelloServiceConsumer struct {
 ```go
 func main() {
 	// 加载配置
-	config.Load()
+	ctx:=context.Background()
+	serv:=config.Load(ctx)
 
 	// 注册提供的rpc服务
-	err := provider.RegisterProvider(PROVIDER_NAME, new(HelloService))
+	err := serv.RegisterProvider(new(HelloService))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// 启动服务
-	provider.ListenAndServe()
-	gracefulShutdown()
+	err=serv.ListenAndServe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	gracefulShutdown(serv)
 }
 ```
 #### consumer
@@ -91,10 +97,11 @@ var p = HelloServiceConsumer{}
 
 func main() {
 	// 加载配置
-	config.Load()
+	ctx:=context.Background()
+	serv:=config.Load(ctx)
 	
 	// 注册消费的服务
-	err := consumer.RegistryConsumer(PROVIDER_NAME, &p)
+	err := serv.RegisterConsumer(PROVIDER_NAME, &p)
 	if err != nil {
 		log.Fatal("error: ", err)
 	}
@@ -120,7 +127,13 @@ func main() {
 	})
 
 	log.Println("consumer service begin listening....")
-	log.Fatal(http.ListenAndServe(":9090", nil))
+	server := &http.Server{Addr: ":9090"}
+	err=serv.ListenAndServe()
+	if err!=nil{
+		log.Fatal(err)
+	}
 
+	go func() {log.Println(http.ListenAndServe(":9090", nil)) }()
+	gracefulShutdown(server,serv)
 }
 ```

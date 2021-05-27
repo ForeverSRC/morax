@@ -56,23 +56,28 @@ type HelloServiceConsumer struct {
 
 ```go
 func main() {
-	config.Load()
+	// 加载配置
+	ctx:=context.Background()
+	serv:=config.Load(ctx)
 
-	err := provider.RegisterProvider(PROVIDER_NAME, new(HelloService))
+	// 注册提供的rpc服务
+	err := serv.RegisterProvider(new(HelloService))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	provider.ListenAndServe()
-	gracefulShutdown()
+	// 启动服务
+	err=serv.ListenAndServe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	gracefulShutdown(serv)
 }
 ```
 
 morax要求provider的服务名唯一，在底层调用`net/rpc`包的`RegisterName()`方法时，统一传入提供给消费者的`PROVIDER_NAME`	
 
-随后，启动provider服务即可。
-
-## 服务端内部实现介绍
+## 内部实现
 
 
 

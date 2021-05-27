@@ -28,14 +28,16 @@ var v = viper.New()
 func Load(ctx context.Context) *service.MoraxService {
 	loadConf()
 	initLogger()
-
-	ms := new(service.MoraxService)
-
-	initService(ms, ctx)
-	initHealthCheck(ms)
-
 	initRegistryClient()
 
+	return initMoraxService(ctx)
+}
+
+func initMoraxService(ctx context.Context) *service.MoraxService {
+	ms := new(service.MoraxService)
+
+	initServiceInfo(ms, ctx)
+	initHealthCheck(ms)
 	initConsumer(ms)
 	initProvider(ms)
 	return ms
@@ -82,7 +84,7 @@ func initLogger() {
 
 }
 
-func initService(ms *service.MoraxService, ctx context.Context) {
+func initServiceInfo(ms *service.MoraxService, ctx context.Context) {
 	sf := &cs.ServiceConfig{}
 	res, err := genConfigInfo("service", sf, false)
 	if err != nil {

@@ -102,6 +102,12 @@ func (ms *MoraxService) RegisterConsumer(name string, service interface{}) error
 
 // ListenAndServe 启动服务
 func (ms *MoraxService) ListenAndServe() error {
+	// 启动健康检查服务
+	if ms.check == nil {
+		return fmt.Errorf("health check service is not initialized")
+	}
+	ms.check.ListenAndServe()
+
 	// 注册服务
 	registration := ms.genRegistration()
 	err := consul.Register(registration)
@@ -109,16 +115,16 @@ func (ms *MoraxService) ListenAndServe() error {
 		return err
 	}
 
-	// 启动健康检查服务
-	if ms.check == nil {
-		return fmt.Errorf("health check service is not initialized")
+	// 启动consumer watcher（如果有）
+	if ms.con != nil {
+		ms.con.StartWatch()
 	}
-	ms.check.ListenAndServe()
 
 	// 启动provider（如果有）
 	if ms.pro != nil {
 		ms.pro.ListenAndServe()
 	}
+
 	return nil
 }
 
