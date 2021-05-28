@@ -1,33 +1,13 @@
 # Provider
 
-## 使用方法
+## 使用约定
 
-### 1.实现提供的服务
-
-与使用go的`net/rpc`一致，需要创建提供rpc服务的结构体，实现对应的方法：
-
-```go
-type HelloService struct {
-}
-
-func (service *HelloService) Hello(req HelloRequest, resp *HelloResponse) error {
-	*resp = HelloResponse{
-		Result: "Hello " + req.Target,
-	}
-	return nil
-}
-
-func (service *HelloService) Bye(req HelloRequest, resp *HelloResponse) error {
-	*resp = HelloResponse{
-		Result: "Bye " + req.Target,
-	}
-	return nil
-}
-```
-
-> 使用morax时需注意：提供服务的方法，入参与返回值尽可能定义为结构体
-
-### 2.向消费者提供包
+1. 一个provider的服务名唯一，消费者通过服务名确定provider实例
+2. 方法的入参与返回值定义为结构体
+3. 向消费者提供的包包含如下两部分：
+   1. provider在注册中心上的服务名
+   2. 提供方法的入参和返回值结构体
+   3. 供消费者订阅时用的方法结构体
 
 ```go
 const PROVIDER_NAME = "sample-hello-service"
@@ -46,147 +26,51 @@ type HelloServiceConsumer struct {
 }
 ```
 
-包括：
-
-* 服务提供者服务名
-* 方法的入参和返回值的结构体
-* 消费者消费服务时调用的结构体
-
-### 3.注册提供的服务
-
-```go
-func main() {
-	// 加载配置
-	ctx:=context.Background()
-	serv:=config.Load(ctx)
-
-	// 注册提供的rpc服务
-	err := serv.RegisterProvider(new(HelloService))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 启动服务
-	err=serv.ListenAndServe()
-	if err != nil {
-		log.Fatal(err)
-	}
-	gracefulShutdown(serv)
-}
-```
-
-morax要求provider的服务名唯一，在底层调用`net/rpc`包的`RegisterName()`方法时，统一传入提供给消费者的`PROVIDER_NAME`	
-
 ## 内部实现
-
-
-
-
-
-![](./img/provider_sequence.png)
 
 ### 1.初始化
 
 初始化过程：
 
-* 读入配置文件中`provider`部分
-* 寻找合适的主机ip
-* 初始化Service
+* 确定provider的ip和port
+* 初始化底层`rpc.Server`
+* 关闭标志位初始化为`false`
 
-#### 寻找合适的主机ip
+### 2.注册提供的方法
 
-使用如下函数寻找合适主机ip。
-
-```go
-func GetLocalAddr() (string, error) {
-	netInterfaces, err := net.Interfaces()
-	if err != nil {
-		return "", err
-	}
-
-	for _, netIf := range netInterfaces {
-		if (netIf.Flags & net.FlagUp) != 0 {
-			addrs, _ := netIf.Addrs()
-			for _, address := range addrs {
-				ipnet, ok := address.(*net.IPNet)
-				if ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-					return ipnet.IP.String(), nil
-				}
-			}
-		}
-	}
-
-	return "", errors.New("no usable local addr")
-}
-```
-
-#### 初始化Service
-
-根据读入的配置文件进行初始化，包括如下内容：
-
-* 存储实例id、提供rpc服务的address、健康检查address
-* 将服务关闭标志位置false
-
-### 2.注册实例到consul
-
-服务名为对外提供的包中声明的服务名，消费者通过此服务名寻找对应服务。
-
-服务的实例ID格式为：
-
-```go
-{serviceName}-{Host}:{Port}
-```
-
-健康检查采用`TCP`的方式进行。
-
-### 3.注册提供的方法
-
-与`net/rpc`包的使用方式一致。
+底层通过`net/rpc`包的使用方式一致。
 
 > 注意：服务的name统一为provider name，而不是具体的结构体的名字
 
-### 4.启动服务
+### 3.启动服务
 
-创建两个goroutine，用于提供rpc服务和健康检查服务。
+在一个单独的goroutine中监听对应的ip地址和端口。
 
-注意：由于每个服务仅在对应的goroutine中阻塞，main goroutine需要阻塞直到需要运行结束，推荐实现优雅关机逻辑。
+### 4.提供服务
 
->由于`net/rpc`包通过启动一个goroutine去调用对应的方法，因此如果实现的方法中存在panic，则会导致服务整体宕机，最好在每个方法中实现recover
+对于每个新的消费者的链接，provider启动一个新的goroutine进行服务。
 
-每个goroutine中，绑定对应的address，同时，服务跟踪每个listener，当goroutine结束退出时，将对应的listener移除跟踪。
+`net/rpc`包中，默认客户端和服务端之间通过单一长链接进行通信，morax的消费者和提供者之间也默认采用单一长链接。
 
-### 5.提供服务/健康检查
-
-对于健康检查服务，直接返回即可。
-
-#### rpc服务
-
-对于每个新的消费者的链接，服务端启动一个新的goroutine进行服务。
-
-`net/rpc`包中，默认客户端和服务端之间通过单一长链接进行通信，因此，morax的消费者和提供者之间也默认采用单一长链接。
-
-### 6.优雅关机
+### 5.优雅关机
 
 rpc 服务端优雅关机原理
 
 > - 停止时，先标记为不接收新请求，新请求过来时直接报错，让客户端重试其它机器。
 > - 检测正在运行的线程，等待线程执行完毕
 
-服务端优雅关机涉及到的资源：
+Provider优雅涉及到的资源：
 
-* 每个客户端链接
-* 服务端listener
-* Consul client种的Idle connection
-  * 默认consul client采用长链接的方式与server通信
-  * 不关闭Idle connection会导致shutdown后goroutine泄漏
+* 每个消费者的长链接
+* provider用于监听的listener
 
-#### 优雅关机过程
+#### Provider优雅关机过程
 
-![](./img/provider_shutdown.png)
+<img src="./img/provider_shutdown.png" style="zoom: 50%;" />
 
-主要参考`net/http`包中的`Shutdown()`方法。
+> 主要参考`net/http`包中的`Shutdown()`方法。
 
-#### provider端实现
+#### 实现
 
 `net/rpc`包中，默认客户端主动关闭链接，服务端没有对应的API主动关闭链接。morax通过自定义的编解码器(`rpc.ServerCodec`)和链接(`net.Conn`)实现链接的主动关闭。
 

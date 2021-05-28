@@ -24,14 +24,18 @@ import (
 const DEFAULT_SERVICE_PORT = 8888
 
 type MoraxService struct {
+	MoraxServiceBase
+	pro   *provider.RpcProvider
+	con   *consumer.RpcConsumer
+	check *consul.HealthCheckService
+}
+
+type MoraxServiceBase struct {
 	name    string
 	host    string
 	id      string
 	rpcPort int
 	ctx     context.Context
-	pro     *provider.RpcProvider
-	con     *consumer.RpcConsumer
-	check   *consul.HealthCheckService
 }
 
 // 初始化API 可以通过config包从配置文件中读取配置，也可自定义配置类
@@ -77,7 +81,6 @@ func (ms *MoraxService) InitRpcProvider(pvf *cp.ProviderConfig) {
 	ms.pro = pro
 }
 
-// 注册API
 // RegisterProvider 注册提供的方法
 func (ms *MoraxService) RegisterProvider(methods interface{}) error {
 	if ms.name == "" {
