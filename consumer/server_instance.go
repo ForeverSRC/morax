@@ -23,6 +23,8 @@ type providerInstance struct {
 
 // ProviderInstances 提供者集群信息
 type ProviderInstances struct {
+	Ctx    context.Context
+	Cancel context.CancelFunc
 	// providerName 订阅的服务名
 	providerName string
 	// instances provider实例map ID->rpc.Client
@@ -84,10 +86,22 @@ func (ps *ProviderInstances) setInstancesIds() {
 	ps.ids = ids
 }
 
-func (ps *ProviderInstances) Watch(ctx context.Context) <-chan bool {
+func (ps *ProviderInstances) StartWatcher() {
+
+	for {
+		select {
+		case <-ps.Ctx.Done():
+			return
+		case <-ps.watch():
+			continue
+		}
+	}
+}
+
+func (ps *ProviderInstances) watch() <-chan bool {
 	logger.Debug("Servers find start")
 	// 阻塞
-	services, meta, err := consul.FindServers(ctx, ps.providerName, ps.idx)
+	services, meta, err := consul.FindServers(ps.Ctx, ps.providerName, ps.idx)
 	logger.Debug("Servers find return")
 
 	resCh := make(chan bool, 1)
