@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ForeverSRC/morax/registry/consul"
 	"reflect"
 	"sync"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 import (
 	"github.com/ForeverSRC/morax/common/types"
-	"github.com/ForeverSRC/morax/common/utils"
 	cc "github.com/ForeverSRC/morax/config/consumer"
 	. "github.com/ForeverSRC/morax/error"
 	"github.com/ForeverSRC/morax/logger"
@@ -25,63 +23,31 @@ type RpcConsumer struct {
 	inShutdown     types.AtomicBool
 	mu             sync.Mutex
 	ctx            context.Context
-	watcherCtx     map[*context.Context]context.CancelFunc
 	allClientClose bool
 }
 
-var consumer *RpcConsumer
-
-func NewRpcConsumer(config *cc.ConsumerConfig) {
-	consumer = consumer.NewRpcConsumer(context.Background(), config)
-}
-
-func (c *RpcConsumer) NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
+func NewRpcConsumer(ctx context.Context, config *cc.ConsumerConfig) *RpcConsumer {
 	con := &RpcConsumer{
-		conf:       config,
-		providers:  make(map[string]*ProviderInstances),
-		ctx:        ctx,
-		watcherCtx: make(map[*context.Context]context.CancelFunc),
+		conf:      config,
+		providers: make(map[string]*ProviderInstances),
+		ctx:       ctx,
 	}
 	con.inShutdown.SetFalse()
 	return con
 }
 
-func Shutdown(ctx context.Context) error {
-	return consumer.Shutdown(ctx)
-}
-
-func (c *RpcConsumer) Shutdown(ctx context.Context) error {
+func (c *RpcConsumer) Shutdown() {
 	// 设置标志位
 	c.inShutdown.SetTrue()
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	// 关闭所有rpc client
 	// net/rpc包中 Client的close方法会通过加锁的机制，阻塞等待当前send完成
 	c.closeAllClientLock()
 	// 停止所有watcher
-	for _, cancel := range c.watcherCtx {
-		cancel()
+	for _, p := range c.providers {
+		p.Cancel()
 	}
-	// 关闭consul client的idle connection
-	consul.CloseIdleConn()
-	c.mu.Unlock()
-
-	pollIntervalBase := time.Millisecond
-	timer := time.NewTimer(utils.NextPollInterval(&pollIntervalBase))
-	defer timer.Stop()
-	for {
-		// 没有打开的rpc client
-		if c.allClientClose {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			timer.Reset(utils.NextPollInterval(&pollIntervalBase))
-		}
-	}
-
 }
 
 func (c *RpcConsumer) closeAllClientLock() {
@@ -93,11 +59,7 @@ func (c *RpcConsumer) closeAllClientLock() {
 	c.allClientClose = true
 }
 
-func RegistryConsumer(name string, service interface{}) error {
-	return consumer.RegistryConsumer(name, service)
-}
-
-func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
+func (c *RpcConsumer) RegisterConsumer(name string, service interface{}) error {
 	//获得传入结构体指针实际指向的结构体
 	s := reflect.ValueOf(service).Elem()
 	if s.Kind() != reflect.Struct {
@@ -239,26 +201,22 @@ func (c *RpcConsumer) RegistryConsumer(name string, service interface{}) error {
 		field.Set(mf)
 	}
 
-	// 设置并启动监，避免对同一个provider多次设定监听
+	// 设置监听
 	if _, ok := c.providers[name]; !ok {
 		pss := NewProviderInstances(name)
-		c.providers[name] = pss
 		ctx, cancel := context.WithCancel(c.ctx)
-		c.watcherCtx[&ctx] = cancel
-
-		go func(ctx context.Context) {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-pss.Watch(ctx):
-					continue
-				}
-			}
-		}(ctx)
+		pss.Ctx = ctx
+		pss.Cancel = cancel
+		c.providers[name] = pss
 	}
 
 	return nil
+}
+
+func (c *RpcConsumer) StartWatch() {
+	for _, v := range c.providers {
+		go v.StartWatcher()
+	}
 }
 
 func checkMethodField(field *reflect.Value) (*reflect.Type, error) {

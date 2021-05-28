@@ -1,20 +1,22 @@
 package config
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 )
 
 import (
-	"github.com/ForeverSRC/morax/common/utils"
+	ck "github.com/ForeverSRC/morax/config/check"
 	cc "github.com/ForeverSRC/morax/config/consumer"
 	cl "github.com/ForeverSRC/morax/config/logger"
 	cp "github.com/ForeverSRC/morax/config/provider"
 	cr "github.com/ForeverSRC/morax/config/registry"
-	"github.com/ForeverSRC/morax/consumer"
+	cs "github.com/ForeverSRC/morax/config/service"
 	"github.com/ForeverSRC/morax/logger"
-	"github.com/ForeverSRC/morax/provider"
 	"github.com/ForeverSRC/morax/registry/consul"
+	"github.com/ForeverSRC/morax/service"
 )
 
 import (
@@ -23,17 +25,22 @@ import (
 
 var v = viper.New()
 
-func Load() {
-	// 读取配置到内存
+func Load(ctx context.Context) *service.MoraxService {
 	loadConf()
-	// 初始化日志
 	initLogger()
-	// 初始化注册中心client
 	initRegistryClient()
-	// 初始化consumer
-	initConsumer()
-	// 初始化provider
-	initProvider()
+
+	return initMoraxService(ctx)
+}
+
+func initMoraxService(ctx context.Context) *service.MoraxService {
+	ms := new(service.MoraxService)
+
+	initServiceInfo(ms, ctx)
+	initHealthCheck(ms)
+	initConsumer(ms)
+	initProvider(ms)
+	return ms
 }
 
 func loadConf() {
@@ -47,78 +54,101 @@ func loadConf() {
 	}
 }
 
-func initLogger() {
-	lg := v.Sub("logger")
-	if lg == nil {
-		log.Fatal("config file error: no logger info")
+func genConfigInfo(key string, confPtr interface{}, ignoreAble bool) (bool, error) {
+	part := v.Sub(key)
+	if part == nil {
+		if ignoreAble {
+			return false, nil
+		} else {
+			return false, fmt.Errorf("config file error: no %s info", key)
+		}
 	}
-
-	lgcf := &cl.LoggerConfig{}
-	err := lg.Unmarshal(lgcf)
+	err := part.Unmarshal(confPtr)
 	if err != nil {
-		log.Fatal("init logger error: ", err)
+		return false, fmt.Errorf("generate %s config info error: %s", key, err)
+	}
+	return true, nil
+}
+
+func initLogger() {
+	lgcf := &cl.LoggerConfig{}
+	res, err := genConfigInfo("logger", lgcf, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !res {
+		return
 	}
 
 	logger.NewLogger(lgcf)
 
 }
 
-func initRegistryClient() {
-	registries := v.Sub("registries")
-	if registries == nil {
-		log.Fatal("config file error: no registries info")
-	}
-	dcf := &cr.ConsulClientConfig{}
-	err := registries.Unmarshal(dcf)
+func initServiceInfo(ms *service.MoraxService, ctx context.Context) {
+	sf := &cs.ServiceConfig{}
+	res, err := genConfigInfo("service", sf, false)
 	if err != nil {
-		log.Fatal("init registry error: ", err)
+		log.Fatal(err)
+	}
+	if !res {
+		return
+	}
+
+	err = ms.InitService(sf, ctx)
+	if err != nil {
+		log.Fatal("init service error: ", err)
+	}
+}
+
+func initHealthCheck(ms *service.MoraxService) {
+	ckf := &ck.CheckConfig{}
+	res, err := genConfigInfo("check", ckf, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !res {
+		return
+	}
+
+	ms.InitHealthCheck(ckf)
+}
+
+func initRegistryClient() {
+	dcf := &cr.ConsulClientConfig{}
+	res, err := genConfigInfo("registries", dcf, false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !res {
+		return
 	}
 
 	consul.NewClient(dcf)
 }
 
-func initConsumer() {
-	cos := v.Sub("consumer")
-	if cos == nil {
+func initConsumer(ms *service.MoraxService) {
+	cmf := &cc.ConsumerConfig{}
+	res, err := genConfigInfo("consumer", cmf, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !res {
 		return
 	}
 
-	cmf := &cc.ConsumerConfig{}
-	err := cos.Unmarshal(cmf)
-	if err != nil {
-		log.Fatal("init consumer error: ", err)
-	}
-
-	consumer.NewRpcConsumer(cmf)
+	ms.InitRpcConsumer(cmf)
 
 }
 
-func initProvider() {
-	prv := v.Sub("provider")
-	if prv == nil {
+func initProvider(ms *service.MoraxService) {
+	pvf := &cp.ProviderConfig{}
+	res, err := genConfigInfo("provider", pvf, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !res {
 		return
 	}
 
-	pvf := &cp.ProviderConfig{}
-	err := prv.Unmarshal(pvf)
-	if err != nil {
-		log.Fatal("init provider error: ", err)
-	}
-
-	if pvf.Service.Host == "" {
-		address, err := utils.GetLocalAddr()
-		if err != nil {
-			log.Fatal("init provider error: ", err)
-		}
-
-		pvf.Service.Host = address
-	}
-
-	provider.InitRpcService(pvf)
-
-	err = consul.Register(pvf)
-	if err != nil {
-		log.Fatal("init provider error: ", err)
-	}
-
+	ms.InitRpcProvider(pvf)
 }
